@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
-const { getRanking } = require('../../src/services/assaultPersistence');
+const { SlashCommandBuilder, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { getRanking, getRankingMensual, getMonthString, getWeeksInMonth, getWeekNumber } = require('../../src/services/assaultPersistence');
 module.exports = {
 data: new SlashCommandBuilder()
 .setName('panel_asaltos')
@@ -21,13 +21,19 @@ new ButtonBuilder().setCustomId('btn_br_ciudad').setLabel('🏢 BR Ciudad').setS
 new ButtonBuilder().setCustomId('btn_br_cayo').setLabel('🏝️ BR Cayo').setStyle(ButtonStyle.Secondary),
 new ButtonBuilder().setCustomId('btn_rey_crimen').setLabel('👑 Rey del Crimen').setStyle(ButtonStyle.Secondary)
 );
+const currentWeek = getWeekNumber();
+const currentMonth = getMonthString();
 const row3 = new ActionRowBuilder().addComponents(
-new ButtonBuilder().setCustomId('btn_ranking_asaltos').setLabel('🏆 Ranking Asaltos').setStyle(ButtonStyle.Danger),
+new ButtonBuilder().setCustomId('btn_ranking_semana').setLabel(`📅 Semana ${currentWeek}`).setStyle(ButtonStyle.Danger),
+new ButtonBuilder().setCustomId('btn_ranking_mes').setLabel(`📆 ${currentMonth}`).setStyle(ButtonStyle.Danger),
+new ButtonBuilder().setCustomId('btn_buscar_semana').setLabel('🔍 Buscar Semana').setStyle(ButtonStyle.Secondary)
+);
+const row4 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_mis_asaltos').setLabel('⚔️ Mis Asaltos').setStyle(ButtonStyle.Secondary)
 );
 await interaction.reply({
 embeds: [embed],
-components: [row1, row2, row3]
+components: [row1, row2, row3, row4]
 });
 }
 };

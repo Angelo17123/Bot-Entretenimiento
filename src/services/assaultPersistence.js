@@ -1,7 +1,7 @@
 const MySQLMatchRepository = require("../infrastructure/database/mysql/MySQLMatchRepository");
 const localRegistro = require("./localRegistro");
 /**
-* Semana ISO (año + número de semana), útil para agrupar asaltos "por semana".
+* Semana ISO (año + número de semana), útil para agrupar asalto(s) "por semana".
 */
 function getISOYearWeekString(d = new Date()) {
 const date = new Date(d.getTime());
@@ -14,6 +14,25 @@ Math.round(
 ((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
 );
 return `${date.getFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+function getWeekNumber(d = new Date()) {
+const date = new Date(d.getTime());
+date.setHours(0, 0, 0, 0);
+date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+const week1 = new Date(date.getFullYear(), 0, 4);
+const weekNo =
+1 +
+Math.round(
+((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
+);
+return weekNo;
+}
+function getMonthString(d = new Date()) {
+const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+return `${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+function getISOYearWeekFromNumber(weekNum, year = new Date().getFullYear()) {
+return `${year}-W${String(weekNum).padStart(2, "0")}`;
 }
 /**
 * Interpreta la opción "semana" del comando: formato ISO, solo número (1–53) o 0/ahora = semana actual.
@@ -203,12 +222,103 @@ rol: userId === record.creatorId ? 'Creador' : 'Apoyo'
 }
 return Object.values(userStats).sort((a, b) => b.count - a.count);
 }
+function getWeeksInMonth(year, month) {
+const weeks = [];
+const firstDay = new Date(year, month, 1);
+const lastDay = new Date(year, month + 1, 0);
+let currentWeek = getISOYearWeekString(firstDay);
+weeks.push(currentWeek);
+for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 7)) {
+const weekStr = getISOYearWeekString(d);
+if (!weeks.includes(weekStr)) {
+weeks.push(weekStr);
+}
+}
+return weeks.sort();
+}
+function getRankingMensual() {
+const fs = require("fs");
+const path = require("path");
+const dir = path.join(__dirname, "..", "..", "LOCALREGISTRO");
+if (!fs.existsSync(dir)) return [];
+const now = new Date();
+const year = now.getFullYear();
+const month = now.getMonth();
+const weeksThisMonth = getWeeksInMonth(year, month);
+const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+const userStats = {};
+for (const file of files) {
+if (!weeksThisMonth.includes(file.replace('.json', ''))) continue;
+try {
+const data = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+if (Array.isArray(data)) {
+for (const record of data) {
+const allParticipants = [record.creatorId, ...(record.staffApoyo || [])].filter(Boolean);
+for (const userId of allParticipants) {
+if (!userStats[userId]) {
+userStats[userId] = {
+userId: userId,
+count: 0,
+assaults: []
+};
+}
+userStats[userId].count++;
+userStats[userId].assaults.push({
+sede: record.sede_name,
+fecha: record.fecha,
+winner: record.winner_name,
+def: record.def_name,
+atk: record.atk_name,
+score: `${record.score_def}-${record.score_atk}`,
+id: record.id,
+rol: userId === record.creatorId ? 'Creador' : 'Apoyo'
+});
+}
+}
+}
+} catch (e) {
+}
+}
+return Object.values(userStats).sort((a, b) => b.count - a.count);
+}
+function getAssaultsByUserMensual(userId) {
+const fs = require("fs");
+const path = require("path");
+const dir = path.join(__dirname, "..", "..", "LOCALREGISTRO");
+if (!fs.existsSync(dir)) return [];
+const now = new Date();
+const year = now.getFullYear();
+const month = now.getMonth();
+const weeksThisMonth = getWeeksInMonth(year, month);
+const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+let allRecords = [];
+for (const file of files) {
+if (!weeksThisMonth.includes(file.replace('.json', ''))) continue;
+try {
+const data = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+if (Array.isArray(data)) {
+allRecords = allRecords.concat(data);
+}
+} catch (e) {
+}
+}
+return allRecords.filter(r => {
+const participants = [r.creatorId, ...(r.staffApoyo || [])];
+return participants.includes(userId);
+});
+}
 module.exports = {
 getISOYearWeekString,
+getWeekNumber,
+getMonthString,
+getISOYearWeekFromNumber,
+getWeeksInMonth,
 resolveWeekQuery,
 sessionToMatchRecord,
 saveFinishedAssault,
 readLocalWeek: localRegistro.readWeek,
 getAssaultsByUser,
 getRanking,
+getRankingMensual,
+getAssaultsByUserMensual,
 };

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const MySQLMatchRepository = require("../../src/infrastructure/database/mysql/MySQLMatchRepository");
-const { resolveWeekQuery, readLocalWeek } = require("../../src/services/assaultPersistence");
+const { resolveWeekQuery, readLocalWeek, getWeekNumber } = require("../../src/services/assaultPersistence");
 function formatLine(i, r) {
 const sub = r.event_subtype ? ` · ${r.event_subtype}` : "";
 const sede = r.sede_name;
@@ -37,6 +37,7 @@ await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 try {
 const raw = interaction.options.getString("semana");
 const week = resolveWeekQuery(raw);
+const weekNum = getWeekNumber(new Date(week.replace('-W', '-01')));
 let rows = readLocalWeek(week);
 let source = "LOCALREGISTRO";
 if (!rows.length && global.mysqlReady) {
@@ -49,14 +50,12 @@ console.error("historial_asaltos MySQL:", e);
 }
 if (!rows.length) {
 return interaction.editReply({
-content:
-`No hay asaltos registrados para la semana **${week}** (ni en \`LOCALREGISTRO\`${global.mysqlReady ? " ni en MySQL" : ""}).\n\n` +
-"*Ejemplos:* vacío o `0` = semana actual · `13` = semana 13 del año en curso · `2026-W13` = formato completo.",
+content: `No hay asalto(s) registrados para la **Semana ${weekNum}** (ni en \`LOCALREGISTRO\`${global.mysqlReady ? " ni en MySQL" : ""}).`,
 });
 }
 const lines = rows.slice(0, 15).map((r, i) => formatLine(i, r));
 const embed = new EmbedBuilder()
-.setTitle(`📋 Asaltos a sede — ${week}`)
+.setTitle(`📋 Asaltos — Semana ${weekNum}`)
 .setColor(0x2b2d31)
 .setDescription(lines.join("\n").slice(0, 6000))
 .setFooter({ text: `${rows.length} registro(s) · ${source}` });

@@ -151,6 +151,7 @@ row2.addComponents(
 new ButtonBuilder().setCustomId(`btn_deshacer_${sessionId}`).setLabel('Deshacer Ronda').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
 new ButtonBuilder().setCustomId(`btn_refrescar_${sessionId}`).setLabel('Refrescar').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
 new ButtonBuilder().setCustomId(`btn_add_staff_${sessionId}`).setLabel('Invitar León').setEmoji('➕').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_ver_staff_${sessionId}`).setLabel('Ver Leones').setEmoji('🦁').setStyle(ButtonStyle.Secondary),
 isFinished
 ? new ButtonBuilder().setCustomId(`btn_cancelar_${sessionId}`).setLabel(isBicicleta ? 'Finalizar Evento' : 'Dar por finalizado el asalto').setEmoji('✅').setStyle(ButtonStyle.Success)
 : new ButtonBuilder().setCustomId(`btn_cancelar_${sessionId}`).setLabel('Cancelar Evento').setEmoji('❌').setStyle(ButtonStyle.Danger)
@@ -237,44 +238,22 @@ flags: MessageFlags.Ephemeral
 });
 }
 if (interaction.isButton() && interaction.customId === 'btn_ranking_asaltos') {
-const { getRanking, getISOYearWeekString } = require('../../src/services/assaultPersistence');
+const { getRanking, getISOYearWeekString, getWeekNumber } = require('../../src/services/assaultPersistence');
+const weekNum = getWeekNumber();
 const week = getISOYearWeekString();
 const ranking = getRanking(week);
-const guild = interaction.guild;
-const members = await guild.members.fetch();
-const memberStats = new Map();
-for (const [id, member] of members) {
-if (!member.user.bot) {
-memberStats.set(id, {
-userId: id,
-count: 0,
-assaults: []
-});
+if (!ranking.length) {
+return interaction.reply({ content: `No hay asalto(s) registrados en la semana **${weekNum}**.`, flags: MessageFlags.Ephemeral });
 }
-}
-for (const entry of ranking) {
-if (memberStats.has(entry.userId)) {
-memberStats.set(entry.userId, entry);
-} else {
-memberStats.set(entry.userId, entry);
-}
-}
-const allUsers = Array.from(memberStats.values()).sort((a, b) => b.count - a.count);
-if (!allUsers.length) {
-return interaction.reply({
-content: `No hay miembros en el servidor.`,
-flags: MessageFlags.Ephemeral
-});
-}
-const lines = allUsers.slice(0, 20).map((entry, i) => {
+const lines = ranking.slice(0, 20).map((entry, i) => {
 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
-return `${medal} **${entry.count}** asalto(s) — <@${entry.userId}>`;
+return `${medal} **${entry.count}** — <@${entry.userId}>`;
 });
 const embed = new EmbedBuilder()
-.setTitle(`🏆 Ranking de Asaltos a Sedes — ${week}`)
+.setTitle(`🏆 Ranking Semana ${weekNum}`)
 .setColor(0xFFD700)
 .setDescription(lines.join('\n'))
-.setFooter({ text: `${allUsers.length} miembro(s) del servidor` });
+.setFooter({ text: `${ranking.length} usuario(s) con assaults` });
 return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 if (interaction.isButton() && interaction.customId === 'btn_mis_asaltos') {
@@ -297,6 +276,79 @@ const embed = new EmbedBuilder()
 .setDescription(lines.join('\n'))
 .setFooter({ text: `${assaults.length} asalto(s) registrado(s)` });
 return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId === 'btn_ranking_semana') {
+const { getRanking, getISOYearWeekString, getWeekNumber } = require('../../src/services/assaultPersistence');
+const weekNum = getWeekNumber();
+const week = getISOYearWeekString();
+const ranking = getRanking(week);
+if (!ranking.length) {
+return interaction.reply({ content: `No hay asalto(s) registrados en la semana **${weekNum}**.`, flags: MessageFlags.Ephemeral });
+}
+const lines = ranking.slice(0, 20).map((entry, i) => {
+const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+return `${medal} **${entry.count}** — <@${entry.userId}>`;
+});
+const embed = new EmbedBuilder()
+.setTitle(`🏆 Ranking Semana ${weekNum}`)
+.setColor(0xFFD700)
+.setDescription(lines.join('\n'))
+.setFooter({ text: `${ranking.length} usuario(s) con assaults` });
+return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId === 'btn_ranking_mes') {
+const { getRankingMensual, getMonthString } = require('../../src/services/assaultPersistence');
+const monthStr = getMonthString();
+const ranking = getRankingMensual();
+if (!ranking.length) {
+return interaction.reply({ content: `No hay asalto(s) registrados en **${monthStr}**.`, flags: MessageFlags.Ephemeral });
+}
+const lines = ranking.slice(0, 20).map((entry, i) => {
+const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+return `${medal} **${entry.count}** — <@${entry.userId}>`;
+});
+const embed = new EmbedBuilder()
+.setTitle(`🏆 Ranking ${monthStr}`)
+.setColor(0xFFD700)
+.setDescription(lines.join('\n'))
+.setFooter({ text: `${ranking.length} usuario(s) con assaults` });
+return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId === 'btn_buscar_semana') {
+const { getRanking } = require('../../src/services/assaultPersistence');
+const currentYear = new Date().getFullYear();
+const options = [];
+for (let i = 1; i <= 52; i++) {
+const weekStr = `${currentYear}-W${String(i).padStart(2, '0')}`;
+options.push({ label: `Semana ${i}`, value: weekStr });
+}
+const selectMenu = new StringSelectMenuBuilder()
+.setCustomId('select_semana_ranking')
+.setPlaceholder('Selecciona una semana')
+.setMinValues(1)
+.setMaxValues(1);
+options.forEach(opt => selectMenu.addOptions(opt));
+const row = new ActionRowBuilder().addComponents(selectMenu);
+return interaction.reply({ content: '🔍 **Selecciona la semana que quieres ver:**', components: [row], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'select_semana_ranking') {
+const selectedWeek = interaction.values[0];
+const { getRanking } = require('../../src/services/assaultPersistence');
+const ranking = getRanking(selectedWeek);
+const weekNum = selectedWeek.split('-W')[1];
+if (!ranking.length) {
+return interaction.update({ content: `No hay asalto(s) registrados en la **Semana ${weekNum}**.`, components: [] });
+}
+const lines = ranking.slice(0, 20).map((entry, i) => {
+const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+return `${medal} **${entry.count}** — <@${entry.userId}>`;
+});
+const embed = new EmbedBuilder()
+.setTitle(`🏆 Ranking Semana ${weekNum}`)
+.setColor(0xFFD700)
+.setDescription(lines.join('\n'))
+.setFooter({ text: `${ranking.length} usuario(s) con assaults` });
+return interaction.update({ embeds: [embed], components: [] });
 }
 if (interaction.isStringSelectMenu() && interaction.customId === 'btn_recuperar_panel_seleccion') {
 const sessionId = interaction.values[0];
@@ -625,9 +677,15 @@ const userSelect = new UserSelectMenuBuilder()
 .setMaxValues(10)
 .setDefaultUsers(interaction.user.id);
 const row = new ActionRowBuilder().addComponents(userSelect);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId('btn_confirmar_staff')
+.setLabel('✅ Confirmar Leones')
+.setStyle(ButtonStyle.Success)
+);
 const responseData = {
-content: `🦁 **Paso 3:** Selecciona los organizadores y el evento se creará automáticamente.`,
-components: [row],
+content: `🦁 **Paso 3:** Selecciona los organizadores y haz clic en confirmar.`,
+components: [row, row2],
 flags: MessageFlags.Ephemeral
 };
 try {
@@ -702,14 +760,16 @@ await interaction.followUp({ content: finalMessage, flags: MessageFlags.Ephemera
 await interaction.followUp({ content: auditText, flags: MessageFlags.Ephemeral });
 if (dbSaveResult && dbSaveResult.ok) {
 const localLine = dbSaveResult.localRelative
-? `\n📁 **Archivo local:** \`${dbSaveResult.localRelative}\``
+? `\n📁 **Guardado en:** LOCALREGISTRO/${dbSaveResult.localRelative}`
 : '';
 const mysqlLine = dbSaveResult.mysql
-? '\n🗄️ También guardado en **MySQL**.'
-: '\nℹ️ MySQL no usado o no disponible; el historial queda en la carpeta **LOCALREGISTRO**.';
+? '\n🗄️ **MySQL:** Guardado correctamente.'
+: '\n💾 **Nota:** MySQL no disponible. Registro solo en carpeta local.';
 await interaction.followUp({
 content:
-`📋 **Historial semanal:** asalto registrado (semana **${dbSaveResult.isoYearWeek}** · ID \`${dbSaveResult.matchId}\`).` +
+`✅ **ASALTO REGISTRADO CORRECTAMENTE**\n` +
+`📅 **Semana:** ${dbSaveResult.isoYearWeek}\n` +
+`🆔 **ID:** ${dbSaveResult.matchId}` +
 localLine +
 mysqlLine,
 flags: MessageFlags.Ephemeral
@@ -744,6 +804,23 @@ staffIds.unshift(interaction.user.id);
 }
 console.log('📋 Staff IDs guardado:', staffIds);
 setup.staffIds = staffIds;
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId('btn_confirmar_staff')
+.setLabel('✅ Confirmar Leones')
+.setStyle(ButtonStyle.Success)
+);
+return interaction.update({
+content: `🦁 **Paso 3:** Selecciona los organizadores y haz clic en confirmar.`,
+components: [row2]
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_confirmar_staff') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) {
+return interaction.reply({ content: '❌ Sesión expirada. Por favor inicia el proceso de nuevo.', flags: MessageFlags.Ephemeral });
+}
+const staffIds = setup.staffIds || [interaction.user.id];
 const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
 const session = sessionManager.createSession(sessionId, {
 sede: (setup.sedeData?.nombre || 'Sede Desconocida').toUpperCase(),
@@ -999,6 +1076,13 @@ const row = new ActionRowBuilder().addComponents(userSelect);
 return interaction.reply({
 content: '🦁 Selecciona al staff que deseas invitar a este panel:',
 components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_ver_staff') {
+const staffList = session.staff.map(id => `<@${id}>`).join('\n');
+return interaction.reply({
+content: `🦁 **Leones del Asalto:**\n${staffList}`,
 flags: MessageFlags.Ephemeral
 });
 }

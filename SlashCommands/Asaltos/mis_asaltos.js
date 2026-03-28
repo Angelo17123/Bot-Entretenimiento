@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-const { getAssaultsByUser, resolveWeekQuery } = require("../../src/services/assaultPersistence");
+const { getAssaultsByUser, resolveWeekQuery, getWeekNumber } = require("../../src/services/assaultPersistence");
 function formatAssaultLine(i, r) {
 const sub = r.event_subtype ? ` · ${r.event_subtype}` : "";
 return `${i + 1}. **${r.sede_name}**${sub} · ${r.def_name} **${r.score_def}-${r.score_atk}** ${r.atk_name} · 🏆 ${r.winner_name} · 📅 ${r.fecha}`;
@@ -20,16 +20,17 @@ await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 try {
 const raw = interaction.options.getString("semana");
 const week = resolveWeekQuery(raw);
+const weekNum = getWeekNumber(new Date(week.replace('-W', '-01')));
 const userId = interaction.user.id;
 const assaults = getAssaultsByUser(userId, week);
 if (!assaults.length) {
 return interaction.editReply({
-content: `No tienes asaltos registrados para la semana **${week}**.\n\n*Ejemplos:* vacío o \`0\` = semana actual · \`13\` = semana 13 del año en curso · \`2026-W13\` = formato completo.`,
+content: `No tienes asalto(s) registrados para la **Semana ${weekNum}**.`,
 });
 }
 const lines = assaults.slice(0, 20).map((r, i) => formatAssaultLine(i, r));
 const embed = new EmbedBuilder()
-.setTitle(`⚔️ Tus Asaltos a Sede — ${week}`)
+.setTitle(`⚔️ Tus Asaltos — Semana ${weekNum}`)
 .setColor(0x2b2d31)
 .setDescription(lines.join("\n").slice(0, 3800))
 .setFooter({ text: `${assaults.length} asalto(s) registrado(s)` });
