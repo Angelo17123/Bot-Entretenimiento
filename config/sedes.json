@@ -1,0 +1,38 @@
+{
+  "barragem": {
+    "nombre": "Barragem",
+    "emoji": "🌊",
+    "capacidad": "25 vs 25 o más",
+    "coords": {
+      "defensa": "1379.13, 1174.25, 114.22, 45.35",
+      "ataque": "897.87, 17.01, 78.88, 158.00"
+    }
+  },
+  "caribe": {
+    "nombre": "Caribe",
+    "emoji": "🌴",
+    "capacidad": "15 vs 15",
+    "coords": {
+      "defensa": "-126.33, 992.88, 235.76, 184.67",
+      "ataque": "209.86, 1225.26, 225.46, 57.17"
+    }
+  },
+  "verdes": {
+    "nombre": "Verdes",
+    "emoji": "🟢",
+    "capacidad": "20 vs 20 / 22 vs 22",
+    "coords": {
+      "defensa": "-1551.66, 858.45, 181.94, 272.42",
+      "ataque": "-1806.40, 454.49, 128.30, 40.63"
+    }
+  },
+  "warlocks": {
+    "nombre": "Warlocks",
+    "emoji": "🔧",
+    "capacidad": "15 vs 15 / 18 vs 18",
+    "coords": {
+      "defensa": "-1898.70, 2027.62, 140.74, 339.35",
+      "ataque": "-1544.18, 863.84, 181.43, 70.49"
+    }
+  }
+}

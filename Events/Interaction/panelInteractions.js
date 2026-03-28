@@ -1,0 +1,1049 @@
+const { Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
+const sessionManager = require('../../managers/sessionManager');
+const sedesConfig = require('../../config/sedes.json');
+const faccionesConfig = require('../../config/facciones.json');
+const assaultPersistence = require('../../src/services/assaultPersistence');
+const finalMessages = [
+(sede, win, lose) => `🔥 CAOS Y GLORIA EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 VICTORIA APLASTANTE DE ${win}\nEntraron, ejecutaron y dominaron. Una exhibición de fuerza y jerarquía.\nEl rival no tuvo respuesta ante tal despliegue de poder. 👑 💪\n\n⚔️ ${lose} RESISTIÓ\nA pesar de la tormenta, se mantuvieron firmes hasta el último aliento.\nHoy no fue su día, pero la guerra continúa.\n\n✨ El polvo se asienta y solo un nombre resuena:\n${win}. La historia la escriben los vencedores.`,
+(sede, win, lose) => `🔥 ASALTO A SEDE EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 VICTORIA ABSOLUTA DE ${win}\nLa estrategia y el plomo hablaron por sí solos. Un asalto impecable.\nNadie pudo detener el avance de sus fuerzas. 👑 💥\n\n⚔️ ${lose} CAYÓ CON HONOR\nLucharon cada centímetro de la sede, pero la balanza se inclinó en su contra.\nLa venganza se servirá fría en el próximo encuentro.\n\n✨ Las calles tienen un nuevo dueño hoy:\n${win}. Respeto y poder conquistado.`,
+(sede, win, lose) => `🔥 INFIERNO DESATADO EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 ${win} RECLAMA EL TRONO\nUna demostración de poder puro. Arrasaron con cualquier resistencia en su camino.\nEl control total ha sido asegurado. 👑 🔫\n\n⚔️ ${lose} DIO LA CARA\nNo hubo rendición, solo una derrota ante un enemigo implacable.\nLas heridas sanarán, pero el orgullo exige revancha.\n\n✨ El eco de los disparos se desvanece y el veredicto es claro:\n${win}. Los reyes absolutos de la sesión.`
+];
+const eventFinalMessages = [
+(sede, win, lose) => `🔥 DOMINIO TOTAL EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 ${win} SE LLEVA LA VICTORIA\nDemostraron una coordinación perfecta y se alzaron con el premio.\nEl equipo rival no pudo frenar su avance imparable. 👑 🚲\n\n⚔️ ${lose} LO DIO TODO\nLucharon cada segundo, pero la victoria se les escapó de las manos.\n¡Habrá revancha en el próximo gran evento!\n\n✨ El rugido de los motores se apaga y el ganador es:\n${win}. Los nuevos campeones del evento.`,
+(sede, win, lose) => `🔥 GRAN EVENTO EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 ${win} RECLAMA EL TROFEO\nUna exhibición táctica impecable. Se llevaron el objetivo ante la mirada del rival.\nLa gloria y el botín son suyos hoy. 👑 💎\n\n⚔️ ${lose} CAYÓ CON DIGNIDAD\nUna batalla reñida hasta el último aliento. Hoy la suerte no estuvo de su lado.\nEl esfuerzo fue máximo, pero el resultado fue para el otro bando.\n\n✨ ¡La ciudad ha sido testigo de una gran competición!\n${win}. Respeto ganado en la arena.`,
+];
+function getRandomFlavorText(sede, win, lose, isBicicleta = false) {
+const messages = isBicicleta ? eventFinalMessages : finalMessages;
+return messages[Math.floor(Math.random() * messages.length)](sede, win, lose);
+}
+const pendingSetups = new Map();
+/**
+* Genera un StringSelectMenuBuilder paginado para las facciones (Límite 25 de Discord)
+*/
+function getPaginatedFactionMenu(customId, placeholder, page = 0) {
+const allFactions = Object.entries(faccionesConfig)
+.sort((a, b) => a[1].nombre.localeCompare(b[1].nombre));
+const TOTAL_ITEMS = allFactions.length;
+const pageSize = 24;
+const totalPages = Math.ceil(TOTAL_ITEMS / pageSize);
+const start = page * pageSize;
+const end = start + pageSize;
+const pagedFactions = allFactions.slice(start, end);
+const options = [];
+pagedFactions.forEach(([key, data]) => {
+options.push({
+label: `${data.emoji || '🏳️'} ${data.nombre}`,
+value: key
+});
+});
+if (page < totalPages - 1) {
+options.push({
+label: `Siguiente Página (${page + 2}/${totalPages}) ➡️`,
+value: `PAGINA_SIGUIENTE_${page + 1}`
+});
+}
+if (page > 0) {
+options.push({
+label: `⬅️ Página Anterior (${page}/${totalPages})`,
+value: `PAGINA_ANTERIOR_${page - 1}`
+});
+}
+return new StringSelectMenuBuilder()
+.setCustomId(customId)
+.setPlaceholder(`${placeholder} (Pág ${page + 1}/${totalPages})`)
+.addOptions(options.map(opt => {
+const builder = new StringSelectMenuOptionBuilder()
+.setLabel(opt.label)
+.setValue(opt.value);
+if (opt.emoji) builder.setEmoji(opt.emoji);
+return builder;
+}));
+}
+function createMasterPanelEmbed(session) {
+const defName = session.teamA.role === 'Defensa' ? session.teamA.name : session.teamB.name;
+const atkName = session.teamA.role === 'Ataque' ? session.teamA.name : session.teamB.name;
+let totalMatch = session.capacity.match(/(\d+)\s*vs\s*(\d+)/i);
+let totalStr = '';
+if (totalMatch) {
+totalStr = `\n👥 **Total:** ${parseInt(totalMatch[1]) + parseInt(totalMatch[2])}`;
+}
+let desc = `**📊 ESTADO ACTUAL**\n`;
+desc += `🏰 **Sede:** ${session.sede}\n`;
+if (session.isBicicleta) {
+desc += `🔵 **Eq. 1:** ${session.teamA.name}\n`;
+desc += `🔴 **Eq. 2:** ${session.teamB.name}${totalStr}\n`;
+} else {
+desc += `🛡️ **Def:** ${defName}\n`;
+desc += `⚔️ **Atk:** ${atkName}${totalStr}\n`;
+}
+desc += `👥 **Capacidad:** ${session.capacity}\n`;
+desc += `🦁 **Leones:** ${session.staff.map(id => `<@${id}>`).join(', ')}\n\n`;
+desc += `**🌍 UBICACIONES Y COORDENADAS**\n`;
+const isBicicleta = session.isBicicleta;
+const sedeCoords = session.sedeCoords || { defensa: 'N/A', ataque: 'N/A' };
+const atacanteCoords = session.atacanteCoords || 'N/A';
+const defensorCoords = session.defensorCoords || 'N/A';
+if (isBicicleta) {
+desc += `🔵 **Equipo 1 (TP):** \`${sedeCoords.defensa || 'N/A'}\`\n`;
+desc += `🔴 **Equipo 2 (TP):** \`${sedeCoords.ataque || 'N/A'}\`\n`;
+desc += `🔴 **Coordenadas de ${session.initialAttackers || 'Atacantes'}:** \`${atacanteCoords}\`\n`;
+desc += `🔵 **Coordenadas de ${session.initialDefenders || 'Defensores'}:** \`${defensorCoords}\`\n\n`;
+} else {
+desc += `🛡️ **Defensa (TP):** \`${sedeCoords.defensa || 'N/A'}\`\n`;
+desc += `⚔️ **Ataque (TP):** \`${sedeCoords.ataque || 'N/A'}\`\n`;
+desc += `⚔️ **Coordenadas de ${session.initialAttackers || 'Atacantes'}:** \`${atacanteCoords}\`\n`;
+desc += `🛡️ **Coordenadas de ${session.initialDefenders || 'Defensores'}:** \`${defensorCoords}\`\n\n`;
+}
+desc += `🎯 **Ronda:** ${session.currentRound || 'N/A'}\n`;
+desc += `📈 **Marcador:** ${session.teamA.name || 'N/A'} ${session.teamA.points || 0} - ${session.teamB.points || 0} ${session.teamB.name || 'N/A'}\n\n`;
+if (isBicicleta) {
+desc += `🎯 **Mejor de 5** | 🏆 **Para ganar:** 3`;
+} else {
+desc += `🎯 **Mejor de 3** | 🏆 **Para ganar:** 2`;
+}
+let title = '⚡ GESTOR DE ASALTOS';
+if (session.isBicicleta) title = '⚡ GESTOR DE EVENTOS';
+else if (session.subtype === 'vip') title = '💎 GESTOR DE ASALTO VIP';
+else if (session.subtype === 'custom') title = '🛠️ GESTOR DE ASALTO CUSTOM';
+return new EmbedBuilder()
+.setTitle(title)
+.setColor(session.subtype === 'vip' ? 0xFFD700 : 0xff0000)
+.setDescription(desc);
+}
+function getMasterPanelRows(session, sessionId) {
+const isBicicleta = session.isBicicleta;
+const targetWins = isBicicleta ? 3 : 2;
+const isFinished = session.teamA.points >= targetWins || session.teamB.points >= targetWins;
+const isTieBreaker = !isBicicleta && session.teamA.points === 1 && session.teamB.points === 1 && session.currentRound === 3 && !session.tieRolesSelected;
+const row1 = new ActionRowBuilder();
+if (isBicicleta) {
+if (isFinished) {
+row1.addComponents(
+new ButtonBuilder().setCustomId(`btn_win_a_${sessionId}`).setLabel(`Gana ${session.teamA.name}`).setStyle(ButtonStyle.Primary).setDisabled(true),
+new ButtonBuilder().setCustomId(`btn_win_b_${sessionId}`).setLabel(`Gana ${session.teamB.name}`).setStyle(ButtonStyle.Danger).setDisabled(true)
+);
+} else {
+row1.addComponents(
+new ButtonBuilder().setCustomId(`btn_win_a_${sessionId}`).setLabel(`Gana ${session.teamA.name}`).setStyle(ButtonStyle.Primary),
+new ButtonBuilder().setCustomId(`btn_win_b_${sessionId}`).setLabel(`Gana ${session.teamB.name}`).setStyle(ButtonStyle.Danger)
+);
+}
+} else {
+if (isFinished) {
+row1.addComponents(
+new ButtonBuilder().setCustomId(`btn_win_a_${sessionId}`).setLabel(`Gana ${session.teamA.name}`).setEmoji('🛡️').setStyle(ButtonStyle.Primary).setDisabled(true),
+new ButtonBuilder().setCustomId(`btn_win_b_${sessionId}`).setLabel(`Gana ${session.teamB.name}`).setEmoji('⚔️').setStyle(ButtonStyle.Danger).setDisabled(true)
+);
+} else if (isTieBreaker) {
+row1.addComponents(
+new ButtonBuilder().setCustomId(`btn_tie_atk_a_${sessionId}`).setLabel(`${session.teamA.name} Ataca (R3)`).setStyle(ButtonStyle.Success),
+new ButtonBuilder().setCustomId(`btn_tie_atk_b_${sessionId}`).setLabel(`${session.teamB.name} Ataca (R3)`).setStyle(ButtonStyle.Danger)
+);
+} else {
+row1.addComponents(
+new ButtonBuilder().setCustomId(`btn_win_a_${sessionId}`).setLabel(`Gana ${session.teamA.name}`).setEmoji('🛡️').setStyle(ButtonStyle.Primary),
+new ButtonBuilder().setCustomId(`btn_win_b_${sessionId}`).setLabel(`Gana ${session.teamB.name}`).setEmoji('⚔️').setStyle(ButtonStyle.Danger)
+);
+}
+}
+const row2 = new ActionRowBuilder();
+row2.addComponents(
+new ButtonBuilder().setCustomId(`btn_deshacer_${sessionId}`).setLabel('Deshacer Ronda').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_refrescar_${sessionId}`).setLabel('Refrescar').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_add_staff_${sessionId}`).setLabel('Invitar León').setEmoji('➕').setStyle(ButtonStyle.Secondary),
+isFinished
+? new ButtonBuilder().setCustomId(`btn_cancelar_${sessionId}`).setLabel(isBicicleta ? 'Finalizar Evento' : 'Dar por finalizado el asalto').setEmoji('✅').setStyle(ButtonStyle.Success)
+: new ButtonBuilder().setCustomId(`btn_cancelar_${sessionId}`).setLabel('Cancelar Evento').setEmoji('❌').setStyle(ButtonStyle.Danger)
+);
+const row3 = new ActionRowBuilder();
+if (session.isBicicleta) {
+row3.addComponents(
+new ButtonBuilder().setCustomId(`btn_aviso_5m_${sessionId}`).setLabel('5 Minutos').setEmoji('⏱️').setStyle(ButtonStyle.Primary),
+new ButtonBuilder().setCustomId(`btn_aviso_objetivo_${sessionId}`).setLabel('Objetivo').setEmoji('🎯').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_aviso_reglas_${sessionId}`).setLabel('Reglas').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_aviso_inicio_${sessionId}`).setLabel('Iniciar Ronda').setEmoji('🎉').setStyle(ButtonStyle.Success)
+);
+} else {
+row3.addComponents(
+new ButtonBuilder().setCustomId(`btn_aviso_5m_${sessionId}`).setLabel('5 Minutos').setEmoji('⏱️').setStyle(ButtonStyle.Primary),
+new ButtonBuilder().setCustomId(`btn_aviso_reglas_${sessionId}`).setLabel('Reglas').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`btn_aviso_inicio_${sessionId}`).setLabel('Iniciar Ronda').setEmoji('🎉').setStyle(ButtonStyle.Success),
+new ButtonBuilder().setCustomId(`btn_aviso_pausa_${sessionId}`).setLabel('Alerta León (Pausa)').setEmoji('🛑').setStyle(ButtonStyle.Danger)
+);
+}
+return [row1, row2, row3];
+}
+module.exports = {
+name: Events.InteractionCreate,
+async execute(interaction) {
+try {
+if (interaction.isButton() && interaction.customId === 'btn_registrar_asalto') {
+const selectTipo = new StringSelectMenuBuilder()
+.setCustomId('asalto_seleccionar_tipo')
+.setPlaceholder('💎 Selecciona el Tipo de Asalto')
+.addOptions(
+new StringSelectMenuOptionBuilder()
+.setLabel('Asalto de Sede (Normal)')
+.setDescription('El proceso clásico con sedes preconfiguradas.')
+.setEmoji('🛡️')
+.setValue('normal'),
+new StringSelectMenuOptionBuilder()
+.setLabel('Asalto de Sede (VIP)')
+.setDescription('Mismo proceso, pero con recompensa VIP especial.')
+.setEmoji('💎')
+.setValue('vip'),
+new StringSelectMenuOptionBuilder()
+.setLabel('Asalto CUSTOM (Manual)')
+.setDescription('Configura sede y coordenadas manualmente.')
+.setEmoji('🛠️')
+.setValue('custom')
+);
+const row = new ActionRowBuilder().addComponents(selectTipo);
+return interaction.reply({
+content: '📍 **Paso 1:** Selecciona el tipo de asalto que deseas organizar.',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_mis_eventos') {
+const isAdm = interaction.member.permissions.has(8n) || interaction.user.id === interaction.guild.ownerId;
+const allSessions = Array.from(sessionManager.sessions.values());
+const filteredSessions = isAdm
+? allSessions
+: allSessions.filter(s => s.staff && s.staff.includes(interaction.user.id));
+if (filteredSessions.length === 0) {
+const noMsg = isAdm
+? '❌ No hay eventos o asaltos activos en todo el servidor.'
+: '❌ No tienes eventos o asaltos activos en este momento.';
+return interaction.reply({ content: noMsg, flags: MessageFlags.Ephemeral });
+}
+const selectMenu = new StringSelectMenuBuilder()
+.setCustomId('btn_recuperar_panel_seleccion')
+.setPlaceholder(isAdm ? '📂 Todos los Eventos Activos (Vista ADM)' : '📂 Tus Eventos o Asaltos Activos');
+filteredSessions.forEach(s => {
+const label = `${s.isBicicleta ? '🚲' : '🛡️'} ${s.sede} (${s.teamA.name} vs ${s.teamB.name})`;
+selectMenu.addOptions(
+new StringSelectMenuOptionBuilder()
+.setLabel(label.slice(0, 100))
+.setValue(s.id)
+);
+});
+return interaction.reply({
+content: isAdm
+? '📂 **Panel de Control ADM:** Selecciona cualquier evento activo para recuperarlo.'
+: '📂 **Tus Eventos:** Selecciona uno de tus asaltos en curso para recuperar el panel.',
+components: [new ActionRowBuilder().addComponents(selectMenu)],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_ranking_asaltos') {
+const { getRanking, getISOYearWeekString } = require('../../src/services/assaultPersistence');
+const week = getISOYearWeekString();
+const ranking = getRanking(week);
+const guild = interaction.guild;
+const members = await guild.members.fetch();
+const memberStats = new Map();
+for (const [id, member] of members) {
+if (!member.user.bot) {
+memberStats.set(id, {
+userId: id,
+count: 0,
+assaults: []
+});
+}
+}
+for (const entry of ranking) {
+if (memberStats.has(entry.userId)) {
+memberStats.set(entry.userId, entry);
+} else {
+memberStats.set(entry.userId, entry);
+}
+}
+const allUsers = Array.from(memberStats.values()).sort((a, b) => b.count - a.count);
+if (!allUsers.length) {
+return interaction.reply({
+content: `No hay miembros en el servidor.`,
+flags: MessageFlags.Ephemeral
+});
+}
+const lines = allUsers.slice(0, 20).map((entry, i) => {
+const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+return `${medal} **${entry.count}** asalto(s) — <@${entry.userId}>`;
+});
+const embed = new EmbedBuilder()
+.setTitle(`🏆 Ranking de Asaltos a Sedes — ${week}`)
+.setColor(0xFFD700)
+.setDescription(lines.join('\n'))
+.setFooter({ text: `${allUsers.length} miembro(s) del servidor` });
+return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId === 'btn_mis_asaltos') {
+const { getAssaultsByUser, getISOYearWeekString } = require('../../src/services/assaultPersistence');
+const week = getISOYearWeekString();
+const userId = interaction.user.id;
+const assaults = getAssaultsByUser(userId, week);
+if (!assaults.length) {
+return interaction.reply({
+content: `No tienes asalto(s) registrados para la semana **${week}**.`,
+flags: MessageFlags.Ephemeral
+});
+}
+const lines = assaults.slice(0, 15).map((r, i) => {
+return `${i + 1}. **${r.sede_name}** · ${r.def_name} ${r.score_def}-${r.score_atk} ${r.atk_name} · 🏆 ${r.winner_name} · 📅 ${r.fecha}`;
+});
+const embed = new EmbedBuilder()
+.setTitle(`⚔️ Tus Asaltos a Sede — ${week}`)
+.setColor(0x2b2d31)
+.setDescription(lines.join('\n'))
+.setFooter({ text: `${assaults.length} asalto(s) registrado(s)` });
+return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'btn_recuperar_panel_seleccion') {
+const sessionId = interaction.values[0];
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ La sesión ya no existe.', components: [] });
+const embed = createMasterPanelEmbed(session);
+return interaction.update({
+content: `♻️ **Panel Recuperado:** Aquí tienes el control de tu evento en **${session.sede}**.`,
+embeds: [embed],
+components: getMasterPanelRows(session, sessionId)
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_asalto_custom_defensor') {
+const modal = new ModalBuilder()
+.setCustomId('asalto_custom_defensor_modal')
+.setTitle('🛡️ Nombre Custom: Equipo 1 / Defensor');
+const nameInput = new TextInputBuilder()
+.setCustomId('custom_name')
+.setLabel('Nombre de la Facción')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: Los Blancos')
+.setRequired(true);
+modal.addComponents(new ActionRowBuilder().addComponents(nameInput));
+return await interaction.showModal(modal);
+}
+if (interaction.isButton() && interaction.customId === 'btn_asalto_custom_atacante') {
+const modal = new ModalBuilder()
+.setCustomId('asalto_custom_atacante_modal')
+.setTitle('⚔️ Nombre Custom: Equipo 2 / Atacante');
+const nameInput = new TextInputBuilder()
+.setCustomId('custom_name')
+.setLabel('Nombre de la Facción')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: Los Negros')
+.setRequired(true);
+modal.addComponents(new ActionRowBuilder().addComponents(nameInput));
+return await interaction.showModal(modal);
+}
+if (interaction.isButton() && interaction.customId === 'btn_abrir_setup_modal') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: 'Sesión expirada.', flags: MessageFlags.Ephemeral });
+const modal = new ModalBuilder()
+.setCustomId('asalto_setup_modal')
+.setTitle(`👥 Configuración de ${setup.isBicicleta ? 'Evento' : 'Asalto'}`);
+const capacidadInput = new TextInputBuilder()
+.setCustomId('capacidad')
+.setLabel('Cantidad (ej. 15, 20)')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('NUMERO')
+.setRequired(true);
+modal.addComponents(new ActionRowBuilder().addComponents(capacidadInput));
+return interaction.showModal(modal);
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_tipo') {
+const subtype = interaction.values[0];
+pendingSetups.set(interaction.user.id, { subtype });
+if (subtype === 'custom') {
+const modal = new ModalBuilder()
+.setCustomId('asalto_custom_setup_modal')
+.setTitle('🛠️ Configuración Asalto Custom');
+const nameInput = new TextInputBuilder()
+.setCustomId('nombre_sede')
+.setLabel('Nombre de la Sede/Lugar')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: Banco Central / Aeropuerto')
+.setRequired(true);
+const defCoords = new TextInputBuilder()
+.setCustomId('def_coords')
+.setLabel('Coordenadas Defensa (TP)')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: 123.4, -567.8, 90.1')
+.setRequired(true);
+const atkCoords = new TextInputBuilder()
+.setCustomId('atk_coords')
+.setLabel('Coordenadas Ataque (TP)')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: 234.5, -678.9, 01.2')
+.setRequired(true);
+modal.addComponents(
+new ActionRowBuilder().addComponents(nameInput),
+new ActionRowBuilder().addComponents(defCoords),
+new ActionRowBuilder().addComponents(atkCoords)
+);
+return interaction.showModal(modal);
+}
+const selectSede = new StringSelectMenuBuilder()
+.setCustomId('asalto_seleccionar_sede')
+.setPlaceholder('🏰 Selecciona la Sede (Pag 1/1)')
+.addOptions(
+Object.entries(sedesConfig)
+.sort((a, b) => a[1].nombre.localeCompare(b[1].nombre))
+.map(([key, data]) => {
+return new StringSelectMenuOptionBuilder()
+.setLabel(data.nombre)
+.setDescription(`Cap: ${data.capacidad}`)
+.setEmoji(data.emoji || '🏰')
+.setValue(key);
+})
+);
+const row = new ActionRowBuilder().addComponents(selectSede);
+const subtypeLabel = subtype ? subtype.toUpperCase() : 'NORMAL';
+return interaction.update({
+content: `📍 **Paso 2:** Selecciona la Sede para el asalto **${subtypeLabel}**.`,
+components: [row]
+});
+}
+if (interaction.isModalSubmit() && interaction.customId === 'asalto_custom_setup_modal') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: 'Sesión expirada.', flags: MessageFlags.Ephemeral });
+setup.sedeData = {
+nombre: interaction.fields.getTextInputValue('nombre_sede'),
+coords: {
+defensa: interaction.fields.getTextInputValue('def_coords'),
+ataque: interaction.fields.getTextInputValue('atk_coords')
+}
+};
+setup.isBicicleta = false;
+const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
+const row1 = new ActionRowBuilder().addComponents(selectDefensor);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
+);
+const responseData = {
+content: '🛡️ **Paso 2:** Selecciona la facción **DEFENSORA**.',
+components: [row1, row2],
+flags: MessageFlags.Ephemeral
+};
+try {
+if (interaction.isFromMessage()) {
+return await interaction.update(responseData);
+} else {
+return await interaction.reply(responseData);
+}
+} catch (error) {
+if (interaction.replied || interaction.deferred) {
+return interaction.followUp(responseData);
+} else {
+return interaction.reply(responseData);
+}
+}
+}
+if (interaction.isButton() && interaction.customId === 'btn_registrar_duelo') {
+const selectEvento = new StringSelectMenuBuilder()
+.setCustomId('evento_seleccionar_tipo')
+.setPlaceholder('🎮 Selecciona el Evento (Pag 1/1)')
+.addOptions(
+new StringSelectMenuOptionBuilder()
+.setLabel('Roba la Bicicleta al León')
+.setDescription('Muerte de equipo (BO5) por la bicicleta central.')
+.setEmoji('🚲')
+.setValue('bicicleta')
+);
+const row = new ActionRowBuilder().addComponents(selectEvento);
+return interaction.reply({
+content: '📍 **Paso 1 (Eventos):** Selecciona el modo de juego que deseas organizar.',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'evento_seleccionar_tipo') {
+const eventoId = interaction.values[0];
+pendingSetups.set(interaction.user.id, {
+isBicicleta: eventoId === 'bicicleta',
+sedeId: 'BICICLETA_MAPA',
+sedeData: {
+nombre: 'Zona Central de Bicicletas',
+capacidad: '10 vs 10 / 15 vs 15',
+coords: {
+defensa: "352.05, -1961.27, 24.50, 304.62", // Equipo 1
+ataque: "308.73, -2107.26, 17.65, 150.51"   // Equipo 2
+}
+}
+});
+const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Equipo 1');
+const row1 = new ActionRowBuilder().addComponents(selectDefensor);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
+);
+return interaction.update({
+content: '🛡️ **Paso 2:** Selecciona la Banda correspondiente al **Equipo 1**.',
+components: [row1, row2]
+});
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_sede') {
+const sedeId = interaction.values[0];
+const sedeData = sedesConfig[sedeId];
+const setup = pendingSetups.get(interaction.user.id) || {};
+setup.sedeId = sedeId;
+setup.sedeData = sedeData;
+setup.isBicicleta = false;
+pendingSetups.set(interaction.user.id, setup);
+const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
+const row1 = new ActionRowBuilder().addComponents(selectDefensor);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
+);
+return interaction.update({
+content: (setup.isBicicleta ? '🛡️ **Paso 2:** Selecciona la facción correspondiente al **Equipo 1**.' : '🛡️ **Paso 2.1:** Selecciona la facción **DEFENSORA**.'),
+components: [row1, row2]
+});
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_defensor') {
+const value = interaction.values[0];
+if (value.startsWith('PAGINA_')) {
+const page = parseInt(value.split('_').pop());
+const setup = pendingSetups.get(interaction.user.id);
+const placeholder = (setup && setup.isBicicleta) ? '🛡️ Equipo 1' : '🛡️ Defensor';
+const menu = getPaginatedFactionMenu('asalto_seleccionar_defensor', placeholder, page);
+return interaction.update({ components: [new ActionRowBuilder().addComponents(menu), interaction.message.components[1]] });
+}
+const defensorId = value;
+const defensorData = faccionesConfig[defensorId];
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: '❌ La sesión de configuración ha expirado.', flags: MessageFlags.Ephemeral });
+setup.defensores = defensorData;
+const selectAtacante = getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
+const row1 = new ActionRowBuilder().addComponents(selectAtacante);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId('btn_asalto_custom_atacante').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
+);
+return interaction.update({
+content: (setup.isBicicleta ? '⚔️ **Paso 3:** Selecciona la facción correspondiente al **Equipo 2**.' : '⚔️ **Paso 2.2:** Selecciona la facción **ATACANTE**.'),
+components: [row1, row2]
+});
+}
+if (interaction.isModalSubmit() && interaction.customId === 'asalto_custom_defensor_modal') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: 'Sesión expirada.', flags: MessageFlags.Ephemeral });
+setup.defensores = {
+nombre: interaction.fields.getTextInputValue('custom_name'),
+coordenadas: "N/A",
+emoji: '✍️'
+};
+const selectAtacante = getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
+const row1 = new ActionRowBuilder().addComponents(selectAtacante);
+const row2 = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId('btn_asalto_custom_atacante').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
+);
+const responseData = {
+content: setup.isBicicleta ? '⚔️ **Paso 3:** Selecciona la facción correspondiente al **Equipo 2**.' : '⚔️ **Paso 2.2:** Selecciona la facción **ATACANTE**.',
+components: [row1, row2],
+flags: MessageFlags.Ephemeral
+};
+try {
+if (interaction.isFromMessage()) {
+return await interaction.update(responseData);
+} else {
+return await interaction.reply(responseData);
+}
+} catch (error) {
+if (interaction.replied || interaction.deferred) {
+return interaction.followUp(responseData);
+} else {
+return interaction.reply(responseData);
+}
+}
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_atacante') {
+const value = interaction.values[0];
+if (value.startsWith('PAGINA_')) {
+const page = parseInt(value.split('_').pop());
+const setup = pendingSetups.get(interaction.user.id);
+const placeholder = (setup && setup.isBicicleta) ? '⚔️ Equipo 2' : '⚔️ Atacante';
+const menu = getPaginatedFactionMenu('asalto_seleccionar_atacante', placeholder, page);
+return interaction.update({ components: [new ActionRowBuilder().addComponents(menu), interaction.message.components[1]] });
+}
+const atacanteId = value;
+const atacanteData = faccionesConfig[atacanteId];
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: '❌ La sesión de configuración ha expirado. Por favor, reinicia el proceso.', flags: MessageFlags.Ephemeral });
+setup.atacantes = atacanteData;
+const modal = new ModalBuilder()
+.setCustomId('asalto_setup_modal')
+.setTitle(`👥 Configuración de ${setup.isBicicleta ? 'Evento' : 'Asalto'}`);
+const capacidadInput = new TextInputBuilder()
+.setCustomId('capacidad')
+.setLabel('Cantidad (ej. 15, 20)')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('NUMERO')
+.setRequired(true);
+if (setup && setup.sedeData && setup.sedeData.capacidad) {
+const match = setup.sedeData.capacidad.toString().match(/\d+/);
+if (match) capacidadInput.setValue(match[0]);
+}
+modal.addComponents(new ActionRowBuilder().addComponents(capacidadInput));
+return interaction.showModal(modal);
+}
+if (interaction.isModalSubmit() && interaction.customId === 'asalto_custom_atacante_modal') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: 'Sesión expirada.', flags: MessageFlags.Ephemeral });
+setup.atacantes = {
+nombre: interaction.fields.getTextInputValue('custom_name'),
+coordenadas: "N/A",
+emoji: '✍️'
+};
+const row = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId('btn_abrir_setup_modal')
+.setLabel('⚙️ Configurar Capacidad')
+.setStyle(ButtonStyle.Primary)
+);
+const responseData = {
+content: '✅ Nombre de atacante guardado. Haz clic en el botón para finalizar la configuración.',
+components: [row],
+flags: MessageFlags.Ephemeral
+};
+if (interaction.isFromMessage()) {
+return await interaction.update(responseData);
+} else {
+return await interaction.reply(responseData);
+}
+}
+if (interaction.isModalSubmit() && interaction.customId === 'asalto_setup_modal') {
+let capacidad = interaction.fields.getTextInputValue('capacidad');
+if (/^\d+$/.test(capacidad.trim())) {
+capacidad = `${capacidad.trim()} vs ${capacidad.trim()}`;
+}
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) return interaction.reply({ content: '❌ La sesión de configuración ha expirado.', flags: MessageFlags.Ephemeral });
+setup.capacidad = capacidad;
+setup.staffIds = [interaction.user.id];
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId('asalto_seleccionar_orgs')
+.setPlaceholder('🦁 Selecciona LOS ORGANIZADORES')
+.setMinValues(1)
+.setMaxValues(10)
+.setDefaultUsers(interaction.user.id);
+const row = new ActionRowBuilder().addComponents(userSelect);
+const responseData = {
+content: `🦁 **Paso 3:** Selecciona los organizadores y el evento se creará automáticamente.`,
+components: [row],
+flags: MessageFlags.Ephemeral
+};
+try {
+if (interaction.isFromMessage()) {
+return await interaction.update(responseData);
+} else {
+return await interaction.reply(responseData);
+}
+} catch (error) {
+if (interaction.replied || interaction.deferred) {
+return interaction.followUp(responseData);
+} else {
+return interaction.reply(responseData);
+}
+}
+}
+if (interaction.isModalSubmit() && interaction.customId.startsWith('asalto_finalizar_modal_')) {
+const sessionId = interaction.customId.split('_').pop();
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: 'La sesión ya no existe o caducó.', components: [], embeds: [] });
+let liderId = interaction.fields.getTextInputValue('lider_id');
+if (!liderId || liderId.trim() === '') liderId = '[ID_GANADOR]';
+const targetWins = session.isBicicleta ? 3 : 2;
+const winnerTeam = session.teamA.points >= targetWins ? session.teamA : session.teamB;
+const loserTeam = session.teamA.points >= targetWins ? session.teamB : session.teamA;
+const now = new Date();
+const d = String(now.getDate()).padStart(2, '0');
+const m = String(now.getMonth()+1).padStart(2, '0');
+const y = now.getFullYear();
+const h = String(now.getHours()).padStart(2, '0');
+const _m = String(now.getMinutes()).padStart(2, '0');
+let payoutCmd = "";
+if (session.isBicicleta) {
+payoutCmd = `!additem ${liderId} dinheirosujo 4000000 robabicicleta ${h}:${_m} ${d}/${m}`;
+} else if (session.subtype === 'vip') {
+payoutCmd = `!additem ${liderId} vipevento1 1 asaltosedevip ${h}:${_m} ${d}/${m}`;
+} else {
+payoutCmd = `!additem ${liderId} dinheirosujo 7000000 asaltosede ${h}:${_m} ${d}/${m}`;
+}
+const leonesMap = session.staff.map(id => `<@${id}>`).join(' ');
+const flavor = getRandomFlavorText(session.sede, winnerTeam.name, loserTeam.name, session.isBicicleta);
+const finalMessage = `\`\`\`text\n${flavor}\n\`\`\``;
+const auditText = `**📋 REGISTRO DE ${session.isBicicleta ? 'EVENTO' : 'ASALTO'} FINALIZADO**
+\`\`\`text
+⚡ Evento: ${session.isBicicleta ? 'Roba la Bicicleta al León' : (session.subtype === 'vip' ? 'Asalto a Sede VIP' : (session.subtype === 'custom' ? 'Asalto a Sede Custom' : 'Asalto a Sede'))}
+${session.isBicicleta ? '📍 Lugar' : '🏰 Sede Defendida'}: ${session.sede}
+${session.isBicicleta ? '🔵 Equipo 1' : '🛡️ Defensores'}: ${session.initialDefenders}
+${session.isBicicleta ? '🔴 Equipo 2' : '⚔️ Atacantes'}: ${session.initialAttackers}
+👥 Capacidad: ${session.capacity}
+🎯 Total Rondas Jugadas: ${session.currentRound}
+📈 Marcador: ${session.teamA.name} ${session.teamA.points}-${session.teamB.points} ${session.teamB.name}
+🏆 GANADOR: ${winnerTeam.name}
+📅 Fecha: ${d}/${m} ${h}:${_m} ${y}
+🦁 Leones: ${leonesMap}
+🎁 Premiación:
+${payoutCmd}
+\`\`\``;
+let dbSaveResult = null;
+try {
+if (!session.isBicicleta) {
+dbSaveResult = await assaultPersistence.saveFinishedAssault(session, sessionId);
+}
+} catch (dbErr) {
+console.error('❌ Error guardando registro del asalto:', dbErr);
+dbSaveResult = { ok: false, reason: 'error' };
+}
+sessionManager.deleteSession(sessionId);
+await cleanupPublicAnnouncement(session, interaction.client);
+await interaction.update({ content: `El panel del ${session.isBicicleta ? 'evento' : 'asalto'} finalizado ha sido cerrado.`, embeds: [], components: [] });
+await interaction.followUp({ content: `✅ Panel cerrado correctamente por <@${interaction.user.id}>. Emitiendo registros finales...`, flags: MessageFlags.Ephemeral });
+await interaction.followUp({ content: finalMessage, flags: MessageFlags.Ephemeral });
+await interaction.followUp({ content: auditText, flags: MessageFlags.Ephemeral });
+if (dbSaveResult && dbSaveResult.ok) {
+const localLine = dbSaveResult.localRelative
+? `\n📁 **Archivo local:** \`${dbSaveResult.localRelative}\``
+: '';
+const mysqlLine = dbSaveResult.mysql
+? '\n🗄️ También guardado en **MySQL**.'
+: '\nℹ️ MySQL no usado o no disponible; el historial queda en la carpeta **LOCALREGISTRO**.';
+await interaction.followUp({
+content:
+`📋 **Historial semanal:** asalto registrado (semana **${dbSaveResult.isoYearWeek}** · ID \`${dbSaveResult.matchId}\`).` +
+localLine +
+mysqlLine,
+flags: MessageFlags.Ephemeral
+});
+} else if (!session.isBicicleta) {
+if (dbSaveResult && dbSaveResult.reason === 'local_error') {
+await interaction.followUp({
+content:
+'⚠️ **No se pudo escribir** en la carpeta `LOCALREGISTRO`. Revisa permisos del proyecto o la consola del bot.',
+flags: MessageFlags.Ephemeral
+});
+} else if (dbSaveResult && dbSaveResult.reason === 'error') {
+await interaction.followUp({
+content: '⚠️ **Error al guardar** el registro del asalto. Revisa la consola del bot.',
+flags: MessageFlags.Ephemeral
+});
+}
+}
+return;
+}
+if (interaction.isUserSelectMenu() && interaction.customId === 'asalto_seleccionar_orgs') {
+const setup = pendingSetups.get(interaction.user.id);
+if (!setup) {
+return interaction.reply({ content: '❌ Sesión expirada. Por favor inicia el proceso de nuevo.', flags: MessageFlags.Ephemeral });
+}
+const selectedUsers = Array.from(interaction.users.values());
+const selectedIds = selectedUsers.map(u => u.id);
+console.log('📋 Usuarios seleccionados en staff:', selectedIds);
+let staffIds = [...selectedIds];
+if (!staffIds.includes(interaction.user.id)) {
+staffIds.unshift(interaction.user.id);
+}
+console.log('📋 Staff IDs guardado:', staffIds);
+setup.staffIds = staffIds;
+const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+const session = sessionManager.createSession(sessionId, {
+sede: (setup.sedeData?.nombre || 'Sede Desconocida').toUpperCase(),
+defenders: setup.defensores?.nombre || 'Desconocido',
+attackers: setup.atacantes?.nombre || 'Desconocido',
+capacity: setup.capacidad || '15 vs 15',
+staff: staffIds,
+isBicicleta: setup.isBicicleta || false,
+subtype: setup.subtype || 'normal',
+creatorId: interaction.user.id
+});
+session.subtype = setup.subtype || 'normal';
+session.isBicicleta = setup.isBicicleta || false;
+session.initialDefenders = setup.defensores?.nombre || 'Desconocido';
+session.initialAttackers = setup.atacantes?.nombre || 'Desconocido';
+session.sedeCoords = setup.sedeData?.coords || { defensa: "N/A", ataque: "N/A" };
+session.defensorCoords = setup.defensores?.coordenadas || "N/A";
+session.atacanteCoords = setup.atacantes?.coordenadas || "N/A";
+session.history = [];
+session.tieRolesSelected = false;
+sessionManager.updateSession(sessionId, session);
+pendingSetups.delete(interaction.user.id);
+const creatorName = interaction.user.globalName || interaction.user.username;
+const staffList = staffIds.map(id => `<@${id}>`).join(', ');
+const embedPublic = new EmbedBuilder()
+.setColor(0xFFA500)
+.setAuthor({
+name: setup.isBicicleta ? `NUEVO EVENTO REGISTRADO` : `NUEVO ASALTO ${(setup.subtype || 'NORMAL').toUpperCase()} REGISTRADO`,
+iconURL: 'https://cdn.discordapp.com/emojis/1053421111624646736.webp'
+})
+.setTitle(setup.isBicicleta ? `🚲 Evento: **${setup.sedeData?.nombre || 'Evento'}**` : `📌 Sede en Disputa (${(setup.subtype || 'NORMAL').toUpperCase()}): **${session.sede}**`)
+.setDescription(
+`⚔️ **${session.initialAttackers}** 🆚 **${session.initialDefenders}** 🛡️\n\n` +
+`👥 **Formato:** ${session.capacity}\n` +
+`🦁 **Leones Cargados:** ${staffList}\n\n` +
+(setup.isBicicleta ?
+`⚡ **REGLAS RÁPIDAS — EVENTOS** ⚡\n` +
+`1️⃣ Prohibido reanimar durante la ronda.\n` +
+`2️⃣ No toxicidad ni insultos (0 tolerancia).\n` +
+`3️⃣ Sin animaciones de ningún tipo.\n` +
+`4️⃣ Fuego permitido sobre la bicicleta.\n` +
+`5️⃣ Formato: Al mejor de 5 (BO5).`
+:
+`⚡ **REGLAS RÁPIDAS — ASALTOS A SEDES** ⚡\n` +
+`1️⃣ Defensores no salen del perímetro ni usan sótano.\n` +
+`2️⃣ No toxicidad ni dar info estando muerto (/me).\n` +
+`3️⃣ Prohibido VDM, disparar cuerpos o animaciones.\n` +
+`4️⃣ 1 sniper / equipo, 1 blindado (2 si ≥20 jug).\n` +
+`5️⃣ Prohibido usar bugs o exploits → ronda perdida.\n` +
+`6️⃣ Abuso de GP: 2 clips intencionales = ronda rival.`
+)
+)
+.setFooter({ text: `Panel ID: #${sessionId.slice(-5)} • Registrado por ${creatorName}`, iconURL: interaction.user.displayAvatarURL() });
+const btnVerPanel = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId(`btn_ver_panel_${sessionId}`)
+.setLabel(`👁️ Ver Panel de ${creatorName}`)
+.setStyle(ButtonStyle.Secondary)
+);
+await interaction.update({ content: '✅ Organizadores confirmados. Generando panel...', components: [], embeds: [] });
+const msg = await interaction.channel.send({ embeds: [embedPublic], components: [btnVerPanel] });
+session.announcementMsgId = msg.id;
+session.announcementChannelId = msg.channelId;
+sessionManager.updateSession(sessionId, session);
+return;
+}
+if (interaction.isButton() && interaction.customId.startsWith('btn_ver_panel_')) {
+const sessionId = interaction.customId.split('_').pop();
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: 'El evento ya finalizó o fue cancelado.', flags: MessageFlags.Ephemeral });
+const isOwner = interaction.guild && interaction.guild.ownerId === interaction.user.id;
+const isAdmin = interaction.member && interaction.member.roles.cache.some(r => r.name === 'ENT.ADM');
+const isStaff = session.staff.includes(interaction.user.id);
+if (!isStaff && !isOwner && !isAdmin) {
+return interaction.reply({ content: '❌ No cuentas con permisos ni eres un organizador asignado a este evento.', flags: MessageFlags.Ephemeral });
+}
+const embed = createMasterPanelEmbed(session);
+return interaction.reply({ embeds: [embed], components: getMasterPanelRows(session, sessionId), flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton()) {
+const rawId = interaction.customId;
+let actionType = rawId;
+let sessionId = null;
+const parts = rawId.split('_');
+if (parts.length > 2 && parts[parts.length - 1].length === 8) {
+sessionId = parts.pop();
+actionType = parts.join('_');
+} else {
+return;
+}
+const session = sessionManager.getSession(sessionId);
+if (!session) {
+return interaction.reply({
+content: '❌ **La sesión ha expirado o el bot se reinició.**\nSi el evento aún está en curso, pide a un administrador que use `/panel_asaltos` para recrearlo o ignora este panel.',
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_aviso_pausa') {
+return interaction.reply({
+content: '```\n🛑 [ALERTA LEON]\nASALTO PAUSADO POR REVISIÓN\n🛑 MANTENGAN POSICIONES Y DETENGAN EL FUEGO\n🎤 LÍDERES A SOPORTE POR VOZ\n```',
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_aviso_5m') {
+return interaction.reply({
+content: `\`\`\`\n⏳ [AVISO]\n5 MINUTOS PARA PREPARARSE\n⚔️ ENFRENTAMIENTO: ${session.teamA.name} vs ${session.teamB.name}\n🛡️ PREPAREN ARMAMENTO Y POSICIONES\n\`\`\``,
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_aviso_objetivo') {
+return interaction.reply({
+content: '```\n🎯 Objetivo:\nLa bicicleta aparece en el centro del mapa. Los jugadores deben tomarla y llevarla hasta la esquina de su equipo para ganar la ronda. 🏁\n```',
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_aviso_reglas') {
+if (session.isBicicleta) {
+return interaction.reply({
+content: '```\n📜 [REGLAS DEL EVENTO]\n🚫 NO reanimar | 🔇 0 Toxicidad | 🧍 Sin animaciones\n💥 Fuego permitido sobre la bicicleta\n🏆 Formato: BO5 (Mejor de 5)\n```',
+flags: MessageFlags.Ephemeral
+});
+}
+return interaction.reply({
+content: '```\n📜 [REGLAS DE ASALTO]\n🚫 NO reanimar | 🔇 0 Toxicidad | 🧍 Sin animaciones\n📍 Respetar límites | 🚗 VEHÍCULOS: SOLO ATACANTES\n```',
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_aviso_inicio') {
+if (session.isBicicleta) {
+return interaction.reply({
+content: `\`\`\`\n🔥 [INICIO DE RONDA ${session.currentRound}]\n📍 EVENTO: BICICLETA | 🏆 BO5\n⚔️ ENFRENTAMIENTO: ${session.teamA.name} vs ${session.teamB.name}\n🏁 ¡A POR LA BICICLETA!\n\`\`\``,
+flags: MessageFlags.Ephemeral
+});
+}
+const def = session.teamA.role === 'Defensa' ? session.teamA.name : session.teamB.name;
+const atk = session.teamA.role === 'Ataque' ? session.teamA.name : session.teamB.name;
+return interaction.reply({
+content: `\`\`\`\n🔥 [INICIO DE RONDA ${session.currentRound}]\n📍 SEDE: ${session.sede} | 🛡️ DEF: ${def} | ⚔️ ATK: ${atk}\n⚠️ ATENCIÓN: PROHIBIDO REANIMAR\n\`\`\``,
+flags: MessageFlags.Ephemeral
+});
+}
+if (actionType === 'btn_refrescar') {
+const embed = createMasterPanelEmbed(session);
+return interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+}
+if (actionType === 'btn_cancelar') {
+const targetWins = session.isBicicleta ? 3 : 2;
+const isFinished = session.teamA.points >= targetWins || session.teamB.points >= targetWins;
+if (isFinished) {
+const modal = new ModalBuilder()
+.setCustomId(`asalto_finalizar_modal_${sessionId}`)
+.setTitle(session.isBicicleta ? '🏆 Finalizar Evento y Recompensar' : '🏆 Finalizar Asalto y Recompensar');
+const idInput = new TextInputBuilder()
+.setCustomId('lider_id')
+.setLabel('ID del Lider Ganador (Opcional)')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: 512')
+.setRequired(false);
+modal.addComponents(new ActionRowBuilder().addComponents(idInput));
+return interaction.showModal(modal);
+} else {
+await cleanupPublicAnnouncement(session, interaction.client);
+sessionManager.deleteSession(sessionId);
+await interaction.update({ content: 'El evento ha sido cancelado.', embeds: [], components: [] });
+return interaction.followUp({ content: `❌ Evento cancelado por <@${interaction.user.id}>.`, flags: MessageFlags.Ephemeral });
+}
+}
+if (actionType === 'btn_deshacer') {
+if (session.history && session.history.length > 0) {
+const lastState = session.history.pop();
+session.teamA.points = lastState.pointsA;
+session.teamB.points = lastState.pointsB;
+session.teamA.role = lastState.roleA;
+session.teamB.role = lastState.roleB;
+session.currentRound = lastState.currentRound;
+session.tieRolesSelected = lastState.tieRolesSelected;
+sessionManager.updateSession(sessionId, session);
+const embed = createMasterPanelEmbed(session);
+return interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+} else {
+return interaction.followUp({ content: 'No hay más acciones en el historial para deshacer.', flags: MessageFlags.Ephemeral });
+}
+}
+if (actionType === 'btn_win_a' || actionType === 'btn_win_b') {
+if (!session.history) session.history = [];
+session.history.push({
+pointsA: session.teamA.points,
+pointsB: session.teamB.points,
+roleA: session.teamA.role,
+roleB: session.teamB.role,
+currentRound: session.currentRound,
+tieRolesSelected: session.tieRolesSelected || false
+});
+const winnerTeam = actionType === 'btn_win_a' ? session.teamA : session.teamB;
+const loserTeam = actionType === 'btn_win_a' ? session.teamB : session.teamA;
+const targetWins = session.isBicicleta ? 3 : 2;
+winnerTeam.points += 1;
+if (winnerTeam.points >= targetWins) {
+sessionManager.updateSession(sessionId, session);
+const embed = createMasterPanelEmbed(session);
+await interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+const reportWin = `\`\`\`text\n👑 ${session.isBicicleta ? 'EVENTO' : 'ASALTO'} FINALIZADO - VICTORIA\n\n🏆 GANADOR: ${winnerTeam.name}\n📌 ${session.isBicicleta ? 'EVENTO: BICICLETA' : `SEDE: ${session.sede}`}\n📈 MARCADOR FINAL: ${session.teamA.points} - ${session.teamB.points}\n\`\`\``;
+await interaction.followUp({ content: reportWin, flags: MessageFlags.Ephemeral });
+return interaction.followUp({ content: `⭐ **MARCADOR FINAL ALCANZADO (${targetWins} Victorias)**\nPor favor, verifica el panel y presiona **✅ ${session.isBicicleta ? 'Finalizar Evento' : 'Dar por finalizado el asalto'}** para emitir los registros copiables y cerrar el evento.`, flags: MessageFlags.Ephemeral });
+} else if (!session.isBicicleta && session.teamA.points === 1 && session.teamB.points === 1) {
+session.currentRound += 1;
+session.tieRolesSelected = false;
+sessionManager.updateSession(sessionId, session);
+const embed = createMasterPanelEmbed(session);
+await interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+await interaction.followUp({ content: `\`\`\`\n🔥 ¡RONDA ${session.currentRound - 1} FINALIZADA!\n\n🏆 Ganador de la Ronda: ${winnerTeam.name}\n📈 Marcador Global: ${session.teamA.name} ${session.teamA.points} - ${session.teamB.points} ${session.teamB.name}\n\`\`\``, flags: MessageFlags.Ephemeral });
+return interaction.followUp({ content: `\`\`\`\n⚖️ ¡DESEMPATE! (1-1)\nLíderes, tiren dados para decidir los roles de la Ronda 3\n\`\`\``, flags: MessageFlags.Ephemeral });
+} else {
+session.currentRound += 1;
+if (!session.isBicicleta) {
+sessionManager.swapRoles(sessionId);
+}
+const embed = createMasterPanelEmbed(session);
+await interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+return interaction.followUp({ content: `\`\`\`\n🔥 ¡RONDA ${session.currentRound - 1} FINALIZADA!\n\n🏆 Ganador de la Ronda: ${winnerTeam.name}\n📈 Marcador Global: ${session.teamA.name} ${session.teamA.points} - ${session.teamB.points} ${session.teamB.name}\n\`\`\``, flags: MessageFlags.Ephemeral });
+}
+}
+if (actionType === 'btn_tie_atk_a' || actionType === 'btn_tie_atk_b') {
+if (!session.history) session.history = [];
+session.history.push({
+pointsA: session.teamA.points,
+pointsB: session.teamB.points,
+roleA: session.teamA.role,
+roleB: session.teamB.role,
+currentRound: session.currentRound,
+tieRolesSelected: session.tieRolesSelected || false
+});
+if (actionType === 'btn_tie_atk_a') {
+session.teamA.role = 'Ataque';
+session.teamB.role = 'Defensa';
+} else {
+session.teamA.role = 'Defensa';
+session.teamB.role = 'Ataque';
+}
+session.tieRolesSelected = true;
+sessionManager.updateSession(sessionId, session);
+const embed = createMasterPanelEmbed(session);
+await interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
+return interaction.followUp({ content: `✅ Roles asignados para la Ronda 3.`, flags: MessageFlags.Ephemeral });
+}
+if (actionType === 'btn_add_staff') {
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId(`asalto_add_staff_select_${sessionId}`)
+.setPlaceholder('Selecciona el nuevo León a invitar')
+.setMinValues(1)
+.setMaxValues(1);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+content: '🦁 Selecciona al staff que deseas invitar a este panel:',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+}
+if (interaction.isUserSelectMenu() && interaction.customId.startsWith('asalto_add_staff_select_')) {
+const sessionId = interaction.customId.split('_').pop();
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: 'No hay ninguna sesión activa.', components: [] });
+const newUsers = Array.from(interaction.users.values());
+const validStaff = newUsers.filter(u => !u.bot && !session.staff.includes(u.id)).map(u => u.id);
+if (validStaff.length > 0) {
+const updatedStaff = [...session.staff, ...validStaff];
+sessionManager.updateSession(sessionId, { staff: updatedStaff });
+session = sessionManager.getSession(sessionId);
+const staffList = session.staff.map(id => `<@${id}>`).join(', ');
+return interaction.update({
+content: `✅ León(es) añadido(s) correctamente.\n🦁 **Staff actual:** ${staffList}\n\n*Usa "Refrescar" para actualizar la vista del panel.*`,
+components: []
+});
+}
+}
+} catch (error) {
+console.error(`❌ Error en panelInteractions: ${error.message}`, error);
+const errorMsg = `❌ Ocurrió un error interno al procesar esta acción.\n**Error:** \`${error.message}\``;
+if (!interaction.replied && !interaction.deferred) {
+await interaction.reply({ content: errorMsg, flags: MessageFlags.Ephemeral });
+} else {
+await interaction.followUp({ content: errorMsg, flags: MessageFlags.Ephemeral });
+}
+}
+}
+};
+/**
+* Borra el mensaje de anuncio público ("Ver Panel") para mantener el canal limpio.
+*/
+async function cleanupPublicAnnouncement(session, client) {
+if (!session || !session.announcementMsgId || !session.announcementChannelId) return;
+try {
+const channel = await client.channels.fetch(session.announcementChannelId);
+if (channel) {
+const msg = await channel.messages.fetch(session.announcementMsgId);
+if (msg) {
+await msg.delete().catch(() => {});
+}
+}
+} catch (e) {
+}
+}

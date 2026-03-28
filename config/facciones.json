@@ -1,0 +1,132 @@
+{
+  "a_s": {
+    "nombre": "A.S",
+    "emoji": "🛡️",
+    "coordenadas": "111.28, -1944.60, 20.78, 46.04"
+  },
+  "anonimato": {
+    "nombre": "ANONIMATO",
+    "emoji": "🎭",
+    "coordenadas": "999.34, -2506.11, 28.30, 177.96"
+  },
+  "barragem": {
+    "nombre": "BARRAGEM",
+    "emoji": "🚧",
+    "coordenadas": "1367.03, 1146.34, 113.76, 78.31"
+  },
+  "bloodsdiamonds": {
+    "nombre": "BLOODSDIAMONDS",
+    "emoji": "🩸",
+    "coordenadas": "-1254.35, 841.71, 193.38, 2.27"
+  },
+  "caribe": {
+    "nombre": "CARIBE",
+    "emoji": "🌴",
+    "coordenadas": "-131.66, 980.11, 235.84, 124.05"
+  },
+  "china": {
+    "nombre": "CHINA",
+    "emoji": "🐉",
+    "coordenadas": "-3018.92, 93.77, 11.61, 330.42"
+  },
+  "clan_real": {
+    "nombre": "CLAN REAL",
+    "emoji": "👑",
+    "coordenadas": "242.04, 1178.71, 225.46, 80.80"
+  },
+  "cristalpalace": {
+    "nombre": "CRISTALPALACE",
+    "emoji": "💎",
+    "coordenadas": "1389.56,-703.98,67.28,111.06"
+  },
+  "divineghost": {
+    "nombre": "DIVINEGHOST",
+    "emoji": "👻",
+    "coordenadas": "-326.51, 221.86, 87.16, 77.61"
+  },
+  "driftking": {
+    "nombre": "DRIFTKING",
+    "emoji": "🏎️",
+    "coordenadas": "-384.55, -113.41, 38.74, 176.94"
+  },
+  "glyzzup": {
+    "nombre": "GLYZZUP",
+    "emoji": "🌭",
+    "coordenadas": "-974.94, -1478.23, 5.01, 92.53"
+  },
+  "italia": {
+    "nombre": "ITALIA",
+    "emoji": "🇮🇹",
+    "coordenadas": "918.57, 48.50, 80.90, 86.53"
+  },
+  "la04": {
+    "nombre": "LA04",
+    "emoji": "🏙️",
+    "coordenadas": "-1558.28, 111.49, 56.78, 323.29"
+  },
+  "lacandela": {
+    "nombre": "LACANDELA",
+    "emoji": "🔥",
+    "coordenadas": "1260.90, -283.48, 78.47, 46.89"
+  },
+  "legacy": {
+    "nombre": "LEGACY",
+    "emoji": "🏛️",
+    "coordenadas": "770.38,-243.12,66.26,194.25"
+  },
+  "porrosfamily": {
+    "nombre": "PORROSFAMILY",
+    "emoji": "🌿",
+    "coordenadas": "-1459.27, -28.66, 54.65, 339.65"
+  },
+  "redline": {
+    "nombre": "REDLINE",
+    "emoji": "🔴",
+    "coordenadas": "-2309.87, 433.55, 174.47, 270.94"
+  },
+  "shadowsking": {
+    "nombre": "SHADOWSKING",
+    "emoji": "👑",
+    "coordenadas": "-2102.51, -316.17, 13.03, 123.08"
+  },
+  "shahara": {
+    "nombre": "SHAHARA",
+    "emoji": "🏜️",
+    "coordenadas": "-1149.95, -1751.39, 4.54, 289.03"
+  },
+  "sicilia": {
+    "nombre": "SICILIA",
+    "emoji": "🍷",
+    "coordenadas": "-1807.62, 456.29, 128.29, 263.59"
+  },
+  "stk": {
+    "nombre": "S.T.K",
+    "emoji": "⚔️",
+    "coordenadas": "1239.99, -1936.23, 45.62, 265.37"
+  },
+  "tropado7lc": {
+    "nombre": "TROPADO7LC",
+    "emoji": "🪖",
+    "coordenadas": "-1892.36, 2035.24, 140.74, 157.74"
+  },
+  "vendetta": {
+    "nombre": "VENDETTA",
+    "emoji": "🗡️",
+    "coordenadas": "205.62, 776.47, 205.63, 101.45"
+  },
+  "verdes": {
+    "nombre": "VERDES",
+    "emoji": "🟢",
+    "coordenadas": "-1532.36, 858.29, 181.56, 67.66"
+  },
+  "virtude": {
+    "nombre": "VIRTUDE",
+    "emoji": "⚖️",
+    "coordenadas": "-552.70, -922.31, 23.86, 252.38"
+  },
+  "warlocks": {
+    "nombre": "WARLOCKS",
+    "emoji": "🔮",
+    "coordenadas": "721.85, -768.02, 25.00, 176.75"
+  }
+}
