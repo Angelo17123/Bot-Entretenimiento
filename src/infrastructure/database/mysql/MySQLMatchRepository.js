@@ -90,6 +90,9 @@ atkLoss = 1;
 atkPoints = 1;
 atkWin = 1;
 defLoss = 1;
+} else {
+defPoints = 0.5;
+atkPoints = 0.5;
 }
 const updateQuery = `
 INSERT INTO sedes_ranking (sede_name, wins, losses, points, total_matches)

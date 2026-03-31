@@ -292,6 +292,89 @@ module.exports = {
 name: Events.InteractionCreate,
 async execute(interaction) {
 try {
+if (interaction.isButton() && interaction.customId.startsWith('verif_panel_aprobar_')) {
+  const requesterId = interaction.customId.replace('verif_panel_aprobar_', '');
+  const VERIF_CHANNEL_ID = '1488594764298195024';
+  const embed = new EmbedBuilder()
+    .setTitle('🛡️ Sistema de Verificación')
+    .setColor(0x5865F2)
+    .setDescription(
+      '━━━━━━━━━━━━━━━━━━━━━━\n' +
+      '**Bienvenido al sistema de verificación del staff.**\n\n' +
+      'Para verificarte, haz clic en el botón de abajo y completa el formulario.\n\n' +
+      '**📋 Se te pedirá:**\n' +
+      '• Nombre IC\n' +
+      '• ID\n' +
+      '• Rango\n\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━'
+    )
+    .setFooter({ text: 'Sistema de Verificación | FiveM Staff' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('btn_solicitar_verificacion')
+      .setLabel('🛡️ Solicitar Verificación')
+      .setStyle(ButtonStyle.Primary)
+  );
+  try {
+    const channel = await interaction.client.channels.fetch(VERIF_CHANNEL_ID);
+    if (channel) {
+      await channel.send({ embeds: [embed], components: [row] });
+    }
+  } catch (err) {
+    console.error('Error enviando panel de verificación:', err);
+  }
+  const confirmEmbed = new EmbedBuilder()
+    .setColor(0x00FF00)
+    .setTitle('✅ Panel Autorizado')
+    .setDescription(`El panel de verificación ha sido enviado al canal configurado.\nSolicitado por: <@${requesterId}>`)
+    .setTimestamp();
+  await interaction.update({ embeds: [confirmEmbed], components: [] });
+  try {
+    const requester = await interaction.client.users.fetch(requesterId);
+    await requester.send('✅ Tu solicitud de panel de verificación ha sido **autorizada** y el panel ya está disponible en el canal configurado.');
+  } catch (err) {
+    console.error('No se pudo enviar DM al solicitante:', err);
+  }
+  return;
+}
+if (interaction.isButton() && interaction.customId.startsWith('verif_panel_rechazar_')) {
+  const requesterId = interaction.customId.replace('verif_panel_rechazar_', '');
+  const rejectEmbed = new EmbedBuilder()
+    .setColor(0xFF0000)
+    .setTitle('❌ Solicitud Rechazada')
+    .setDescription(`La solicitud de panel de verificación ha sido rechazada.\nSolicitado por: <@${requesterId}>`)
+    .setTimestamp();
+  await interaction.update({ embeds: [rejectEmbed], components: [] });
+  try {
+    const requester = await interaction.client.users.fetch(requesterId);
+    await requester.send('❌ Tu solicitud de panel de verificación ha sido **rechazada** por el administrador.');
+  } catch (err) {
+    console.error('No se pudo enviar DM al solicitante:', err);
+  }
+  return;
+}
+if (interaction.isButton() && interaction.customId === 'btn_solicitar_verificacion') {
+const modal = new ModalBuilder()
+.setCustomId('solicitar_verificacion_modal')
+.setTitle('🛡️ Sistema de Verificación');
+const nombreIc = new TextInputBuilder()
+.setCustomId('verif_nombre_ic')
+.setLabel('Nombre IC')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: Juan_Perez')
+.setRequired(true);
+const idInput = new TextInputBuilder()
+.setCustomId('verif_id')
+.setLabel('ID')
+.setStyle(TextInputStyle.Short)
+.setPlaceholder('Ej: 512')
+.setRequired(true);
+modal.addComponents(
+new ActionRowBuilder().addComponents(nombreIc),
+new ActionRowBuilder().addComponents(idInput)
+);
+return interaction.showModal(modal);
+}
 if (interaction.isButton() && interaction.customId === 'btn_registrar_asalto') {
 const selectTipo = new StringSelectMenuBuilder()
 .setCustomId('asalto_seleccionar_tipo')
@@ -368,27 +451,6 @@ const embed = new EmbedBuilder()
 .setColor(0xFFD700)
 .setDescription(lines.join('\n'))
 .setFooter({ text: `${ranking.length} usuario(s) con assaults` });
-return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-}
-if (interaction.isButton() && interaction.customId === 'btn_mis_asaltos') {
-const { getAssaultsByUser, getISOYearWeekString } = require('../../src/services/assaultPersistence');
-const week = getISOYearWeekString();
-const userId = interaction.user.id;
-const assaults = getAssaultsByUser(userId, week);
-if (!assaults.length) {
-return interaction.reply({
-content: `No tienes asalto(s) registrados para la semana **${week}**.`,
-flags: MessageFlags.Ephemeral
-});
-}
-const lines = assaults.slice(0, 15).map((r, i) => {
-return `${i + 1}. **${r.sede_name}** · ${r.def_name} ${r.score_def}-${r.score_atk} ${r.atk_name} · 🏆 ${r.winner_name} · 📅 ${r.fecha}`;
-});
-const embed = new EmbedBuilder()
-.setTitle(`⚔️ Tus Asaltos a Sede — ${week}`)
-.setColor(0x2b2d31)
-.setDescription(lines.join('\n'))
-.setFooter({ text: `${assaults.length} asalto(s) registrado(s)` });
 return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 if (interaction.isButton() && interaction.customId === 'btn_br_ciudad_iniciar') {
@@ -1344,6 +1406,220 @@ return interaction.reply(responseData);
 }
 }
 }
+if (interaction.isModalSubmit() && interaction.customId === 'solicitar_verificacion_modal') {
+  const nombreIc = interaction.fields.getTextInputValue('verif_nombre_ic');
+  const idInput = interaction.fields.getTextInputValue('verif_id');
+  const rangoSelect = new StringSelectMenuBuilder()
+    .setCustomId(`verif_select_rango_${interaction.user.id}`)
+    .setPlaceholder('Selecciona tu rango')
+    .addOptions(
+      { label: 'Tester', value: '1482523841862303764', emoji: '🧪' },
+      { label: 'Miembro', value: '1482522709564063805', emoji: '👤' },
+      { label: 'Sub', value: '1482523331600060538', emoji: '🔰' },
+      { label: 'Lid', value: '1482523459518206257', emoji: '⭐' },
+      { label: 'Aux', value: '1482523886917517414', emoji: '🛠️' },
+      { label: 'ADM', value: '1482522080972111912', emoji: '👑' }
+    );
+  const row = new ActionRowBuilder().addComponents(rangoSelect);
+  return interaction.reply({
+    content: `🛡️ **Datos recibidos**\nNombre IC: ${nombreIc}\nID: ${idInput}\n\nSelecciona tu rango:`,
+    components: [row],
+    flags: MessageFlags.Ephemeral
+  });
+}
+if (interaction.isStringSelectMenu() && interaction.customId.startsWith('verif_select_rango_')) {
+  const userId = interaction.customId.replace('verif_select_rango_', '');
+  const roleId = interaction.values[0];
+  const rangoLabels = {
+    '1482523841862303764': 'Tester',
+    '1482522709564063805': 'Miembro',
+    '1482523331600060538': 'Sub',
+    '1482523459518206257': 'Lid',
+    '1482523886917517414': 'Aux',
+    '1482522080972111912': 'ADM'
+  };
+  const rangoLabel = rangoLabels[roleId] || roleId;
+  const contentLines = interaction.message.content.split('\n');
+  let nombreIc = 'N/A';
+  let idVal = 'N/A';
+  for (const line of contentLines) {
+    if (line.startsWith('Nombre IC: ')) nombreIc = line.replace('Nombre IC: ', '').trim();
+    if (line.startsWith('ID: ')) idVal = line.replace('ID: ', '').trim();
+  }
+  const now = new Date();
+  const fechaLarga = now.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const fechaCorta = `${now.getDate()}/${now.getMonth()+1}/${now.getFullYear()}`;
+  const userObj = await interaction.client.users.fetch(userId).catch(() => null);
+  const userTag = userObj ? `${userObj.globalName || userObj.username} (${userObj.username})` : userId;
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('📄 Nueva Solicitud de Verificación')
+    .setDescription('━━━━━━━━━━━━━━━━━━━━━━')
+    .addFields(
+      { name: '👤 Usuario', value: `<@${userId}>`, inline: false },
+      { name: '📝 Nombre IC', value: nombreIc, inline: true },
+      { name: '🆔 ID', value: idVal, inline: true },
+      { name: '👤 Equipo', value: '🎉 ENT', inline: true },
+      { name: '⭐ Rango', value: rangoLabel, inline: true },
+      { name: '🏛️ Tipo', value: 'Staff', inline: true },
+      { name: '📅 Fecha', value: fechaLarga, inline: false }
+    )
+    .setFooter({ text: `ID del usuario: ${userId} • ${fechaCorta}` })
+    .setTimestamp();
+  const btnAprobar = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`verif_aprobar_${userId}_${roleId}`)
+      .setLabel('✅ Aceptar')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`verif_rechazar_${userId}`)
+      .setLabel('❌ Rechazar')
+      .setStyle(ButtonStyle.Danger)
+  );
+  try {
+    const targetChannel = await interaction.client.channels.fetch('1488594798335234058');
+    if (targetChannel) {
+      await targetChannel.send({ embeds: [embed], components: [btnAprobar] });
+    }
+  } catch (err) {
+    console.error('Error enviando solicitud de verificación al canal:', err);
+  }
+  return interaction.update({
+    content: '✅ **Solicitud enviada correctamente.** Tu verificación será revisada por el staff.',
+    components: []
+  });
+}
+if (interaction.isButton() && interaction.customId.startsWith('verif_aprobar_')) {
+  const parts = interaction.customId.replace('verif_aprobar_', '').split('_');
+  const userId = parts[0];
+  const roleId = parts.slice(1).join('_');
+  const rangoLabels = {
+    '1482523841862303764': 'Tester',
+    '1482522709564063805': 'Miembro',
+    '1482523331600060538': 'Sub',
+    '1482523459518206257': 'Lid',
+    '1482523886917517414': 'Aux',
+    '1482522080972111912': 'ADM'
+  };
+  const rangoLabel = rangoLabels[roleId] || roleId;
+  const hasPerm = interaction.member.roles.cache.has('1482523886917517414') || interaction.member.roles.cache.has('1482522080972111912');
+  if (!hasPerm) {
+    return interaction.reply({
+      content: '❌ No tienes permisos para aprobar verificaciones. Solo Aux y ADM pueden hacerlo.',
+      flags: MessageFlags.Ephemeral
+    });
+  }
+  const embed = interaction.message.embeds[0];
+  const fields = embed?.fields || [];
+  const nombreIcField = fields.find(f => f.name === '📝 Nombre IC');
+  const idField = fields.find(f => f.name === '🆔 ID');
+  const nombreIc = nombreIcField ? nombreIcField.value.trim() : 'Usuario';
+  const idVal = idField ? idField.value.trim() : '000';
+  let nickname;
+  if (roleId === '1482522080972111912') {
+    nickname = `ADM | 🎆${nombreIc} #BuenaGente`;
+  } else {
+    const prefixes = {
+      '1482523841862303764': 'ENT-T',
+      '1482522709564063805': 'ENT',
+      '1482523331600060538': 'Sub.ENT',
+      '1482523459518206257': 'Lid.ENT',
+      '1482523886917517414': 'Aux.ENT'
+    };
+    const prefix = prefixes[roleId] || 'ENT';
+    nickname = `${prefix} | 🎆${nombreIc} | ${idVal}`;
+  }
+  let nickOk = false;
+  let roleOk = false;
+  let errors = [];
+  try {
+    const member = await interaction.guild.members.fetch(userId);
+    try {
+      await member.setNickname(nickname);
+      nickOk = true;
+    } catch (err) {
+      errors.push(`Nickname: ${err.message}`);
+      console.error('Error cambiando nickname:', err.message);
+    }
+    try {
+      await member.roles.add(roleId);
+      roleOk = true;
+    } catch (err) {
+      errors.push(`Rol: ${err.message}`);
+      console.error('Error asignando rol (verifica que el rol del bot esté por encima del rol a asignar):', err.message);
+    }
+  } catch (err) {
+    console.error('Error aplicando verificación:', err);
+    return interaction.reply({
+      content: `❌ Error al aplicar la verificación: ${err.message}`,
+      flags: MessageFlags.Ephemeral
+    });
+  }
+  const confirmEmbed = new EmbedBuilder()
+    .setColor(nickOk && roleOk ? 0x00FF00 : 0xFFA500)
+    .setTitle(nickOk && roleOk ? '✅ Verificación Aprobada' : '⚠️ Verificación Parcial')
+    .setDescription('━━━━━━━━━━━━━━━━━━━━━━')
+    .addFields(
+      { name: '👤 Usuario', value: `<@${userId}>`, inline: false },
+      { name: '🔰 Nuevo Nickname', value: `${nickname} ${nickOk ? '✅' : '❌'}`, inline: false },
+      { name: '⭐ Rango Asignado', value: `${rangoLabel} ${roleOk ? '✅' : '❌'}`, inline: false },
+      { name: '👑 Aprobado por', value: `${interaction.user}`, inline: false }
+    )
+    .setFooter({ text: `Sistema de Verificación | FiveM Staff` })
+    .setTimestamp();
+  await interaction.update({ embeds: [confirmEmbed], components: [] });
+  try {
+    const targetChannel = await interaction.client.channels.fetch('1488594798335234058');
+    if (targetChannel) {
+      await targetChannel.send({
+        content: `✅ <@${userId}> ha sido verificado como **${rangoLabel}** con nickname: \`${nickname}\`\nAprobado por: ${interaction.user}`
+      });
+    }
+  } catch (err) {
+    console.error('Error enviando confirmación de verificación al canal:', err);
+  }
+  return;
+}
+if (interaction.isButton() && interaction.customId.startsWith('verif_rechazar_')) {
+  const userId = interaction.customId.replace('verif_rechazar_', '');
+  const hasPerm = interaction.member.roles.cache.has('1482523886917517414') || interaction.member.roles.cache.has('1482522080972111912');
+  if (!hasPerm) {
+    return interaction.reply({
+      content: '❌ No tienes permisos para rechazar verificaciones. Solo Aux y ADM pueden hacerlo.',
+      flags: MessageFlags.Ephemeral
+    });
+  }
+  const embed = interaction.message.embeds[0];
+  const fields = embed?.description || '';
+  const nombreIcMatch = fields.match(/\*\*Nombre IC:\*\*\s*(.+)/);
+  const idMatch = fields.match(/\*\*ID:\*\*\s*(.+)/);
+  const nombreIc = nombreIcMatch ? nombreIcMatch[1].trim() : 'Usuario';
+  const idVal = idMatch ? idMatch[1].trim() : '000';
+  const rejectEmbed = new EmbedBuilder()
+    .setColor(0xFF0000)
+    .setTitle('❌ Verificación Rechazada')
+    .setDescription('━━━━━━━━━━━━━━━━━━━━━━')
+    .addFields(
+      { name: '👤 Usuario', value: `<@${userId}>`, inline: false },
+      { name: '📝 Nombre IC', value: nombreIc, inline: true },
+      { name: '🆔 ID', value: idVal, inline: true },
+      { name: '👑 Rechazado por', value: `${interaction.user}`, inline: false }
+    )
+    .setFooter({ text: `Sistema de Verificación | FiveM Staff` })
+    .setTimestamp();
+  await interaction.update({ embeds: [rejectEmbed], components: [] });
+  try {
+    const targetChannel = await interaction.client.channels.fetch('1488594798335234058');
+    if (targetChannel) {
+      await targetChannel.send({
+        content: `❌ La verificación de <@${userId}> (${nombreIc} - ID: ${idVal}) ha sido **rechazada** por ${interaction.user}`
+      });
+    }
+  } catch (err) {
+    console.error('Error enviando rechazo de verificación al canal:', err);
+  }
+  return;
+}
 if (interaction.isModalSubmit() && interaction.customId.startsWith('rey_ganador_modal_')) {
   const sessionId = interaction.customId.split('_').pop();
   const session = sessionManager.getSession(sessionId);
@@ -1437,6 +1713,10 @@ if (interaction.isModalSubmit() && interaction.customId.startsWith('rey_ganador_
     const targetChannel = await interaction.client.channels.fetch('1488337822556491939');
     if (targetChannel) {
       await targetChannel.send(mensajeFinal);
+    }
+    const registroChannel = await interaction.client.channels.fetch('1487871883817914400');
+    if (registroChannel) {
+      await registroChannel.send(mensajeFinal);
     }
   } catch (err) {
     console.error('Error enviando al canal:', err);

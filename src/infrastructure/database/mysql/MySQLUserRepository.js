@@ -47,7 +47,7 @@ return {
 discordId: r.discord_id,
 role: r.role,
 username: r.username,
-serverNickname: r.server_nickname || r.nickname,
+serverNickname: r.server_nickname,
 joinDate: r.join_date
 };
 }
@@ -66,7 +66,7 @@ return rows.map(r => ({
 discordId: r.discord_id,
 role: r.role,
 username: r.username,
-serverNickname: r.server_nickname || r.nickname,
+serverNickname: r.server_nickname,
 joinDate: r.join_date
 }));
 }
