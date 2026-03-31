@@ -8,7 +8,7 @@ function formatDetailedRankingLine(i, entry) {
 const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";
 let text = `${medal} **${entry.count}** — <@${entry.userId}>\n`;
 if (entry.assaults.length > 0) {
-const details = entry.assaults.slice(-5).map(a => `  • ${a.sede}: ${a.winner} vs ${a.def} (${a.score}) - ${a.fecha}`).join("\n");
+const details = entry.assaults.slice(-5).map(a => `  ${a.tipo || '⚔️'} ${a.sede}: ${a.winner} (${a.score}) - ${a.fecha}`).join("\n");
 text += details;
 }
 return text;
@@ -16,7 +16,7 @@ return text;
 module.exports = {
 data: new SlashCommandBuilder()
 .setName("ranking_asaltos")
-.setDescription("Ver ranking de quién realizó más asalto(s) a sedes.")
+.setDescription("Ver ranking de quién realizó más eventos (asaltos, BR, Rey del Crimen).")
 .addStringOption((o) =>
 o
 .setName("semana")
@@ -26,7 +26,7 @@ o
 .addBooleanOption((o) =>
 o
 .setName("detallado")
-.setDescription("Ver detalles de cada asalto (últimos 5)")
+.setDescription("Ver detalles de cada evento (últimos 5)")
 .setRequired(false),
 )
 .setDefaultMemberPermissions(1n << 3n),
@@ -40,7 +40,7 @@ const detallado = interaction.options.getBoolean("detallado") || false;
 const ranking = getRanking(week);
 if (!ranking.length) {
 return interaction.editReply({
-content: `No hay asalto(s) registrados en la **Semana ${weekNum}**.`,
+content: `No hay eventos registrados en la **Semana ${weekNum}**.`,
 });
 }
 const lines = ranking.slice(0, 20).map((entry, i) =>
@@ -50,7 +50,7 @@ const embed = new EmbedBuilder()
 .setTitle(`🏆 Ranking Semana ${weekNum}${detallado ? " (Detallado)" : ""}`)
 .setColor(detallado ? 0x00FF00 : 0xFFD700)
 .setDescription(lines.join("\n").slice(0, 6000))
-.setFooter({ text: `${ranking.length} usuario(s) con assaults` });
+.setFooter({ text: `${ranking.length} usuario(s) con eventos` });
 return interaction.editReply({ embeds: [embed] });
 } catch (err) {
 console.error("ranking_asaltos:", err);

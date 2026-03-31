@@ -1,8 +1,19 @@
 const { Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
 const sessionManager = require('../../managers/sessionManager');
+const sedesManager = require('../../src/infrastructure/database/json/SedesManager');
 const sedesConfig = require('../../config/sedes.json');
 const faccionesConfig = require('../../config/facciones.json');
 const assaultPersistence = require('../../src/services/assaultPersistence');
+const path = require('path');
+const fs = require('fs');
+function getFaccionesBr() {
+const fp = path.join(__dirname, '..', '..', 'config', 'facciones_br.json');
+try {
+return JSON.parse(fs.readFileSync(fp, 'utf8'));
+} catch {
+return {};
+}
+}
 const finalMessages = [
 (sede, win, lose) => `🔥 CAOS Y GLORIA EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 VICTORIA APLASTANTE DE ${win}\nEntraron, ejecutaron y dominaron. Una exhibición de fuerza y jerarquía.\nEl rival no tuvo respuesta ante tal despliegue de poder. 👑 💪\n\n⚔️ ${lose} RESISTIÓ\nA pesar de la tormenta, se mantuvieron firmes hasta el último aliento.\nHoy no fue su día, pero la guerra continúa.\n\n✨ El polvo se asienta y solo un nombre resuena:\n${win}. La historia la escriben los vencedores.`,
 (sede, win, lose) => `🔥 ASALTO A SEDE EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 VICTORIA ABSOLUTA DE ${win}\nLa estrategia y el plomo hablaron por sí solos. Un asalto impecable.\nNadie pudo detener el avance de sus fuerzas. 👑 💥\n\n⚔️ ${lose} CAYÓ CON HONOR\nLucharon cada centímetro de la sede, pero la balanza se inclinó en su contra.\nLa venganza se servirá fría en el próximo encuentro.\n\n✨ Las calles tienen un nuevo dueño hoy:\n${win}. Respeto y poder conquistado.`,
@@ -24,7 +35,7 @@ function getPaginatedFactionMenu(customId, placeholder, page = 0) {
 const allFactions = Object.entries(faccionesConfig)
 .sort((a, b) => a[1].nombre.localeCompare(b[1].nombre));
 const TOTAL_ITEMS = allFactions.length;
-const pageSize = 24;
+const pageSize = 23;
 const totalPages = Math.ceil(TOTAL_ITEMS / pageSize);
 const start = page * pageSize;
 const end = start + pageSize;
@@ -51,13 +62,116 @@ value: `PAGINA_ANTERIOR_${page - 1}`
 return new StringSelectMenuBuilder()
 .setCustomId(customId)
 .setPlaceholder(`${placeholder} (Pág ${page + 1}/${totalPages})`)
-.addOptions(options.map(opt => {
+.addOptions(options.slice(0, 25).map(opt => {
 const builder = new StringSelectMenuOptionBuilder()
 .setLabel(opt.label)
 .setValue(opt.value);
 if (opt.emoji) builder.setEmoji(opt.emoji);
 return builder;
 }));
+}
+function shuffleArray(array) {
+for (let i = array.length - 1; i > 0; i--) {
+const j = Math.floor(Math.random() * (i + 1));
+[array[i], array[j]] = [array[j], array[i]];
+}
+return array;
+}
+function assignLeonsToFactions(leonIds, faccionesPorPersona = 1) {
+const faccionesKeys = Object.keys(getFaccionesBr());
+const shuffledFacciones = shuffleArray([...faccionesKeys]);
+const assignments = {};
+const totalAsignar = leonIds.length * faccionesPorPersona;
+const faccionesAsignar = shuffledFacciones.slice(0, totalAsignar);
+leonIds.forEach((leonId, index) => {
+assignments[leonId] = faccionesAsignar.slice(index * faccionesPorPersona, (index + 1) * faccionesPorPersona);
+});
+return assignments;
+}
+function getZonesFromFile(brType) {
+const fs = require('fs');
+const path = require('path');
+const fileName = brType === 'cayo' ? 'Cayo Zonas.txt' : 'Ciudad Zonas.md';
+const filePath = path.join(__dirname, '..', '..', fileName);
+if (!fs.existsSync(filePath)) return [];
+const content = fs.readFileSync(filePath, 'utf8');
+return content
+.split('\n')
+.map(line => line.trim())
+.filter(line => line.length > 0)
+.map(line => {
+const parts = line.split(':');
+if (parts.length < 2) return null;
+return {
+name: parts[0].trim(),
+coords: parts.slice(1).join(':').trim()
+};
+})
+.filter(Boolean);
+}
+function assignRandomZones(factionKeys, brType) {
+const zones = getZonesFromFile(brType);
+if (zones.length === 0) return {};
+const shuffled = shuffleArray([...zones]);
+const zoneAssignments = {};
+const totalFactions = factionKeys.length;
+const zonesPerFaction = Math.min(1, Math.floor(zones.length / totalFactions));
+factionKeys.forEach((fk, index) => {
+const start = index * zonesPerFaction;
+const end = start + zonesPerFaction;
+zoneAssignments[fk] = shuffled.slice(start, end);
+});
+return zoneAssignments;
+}
+function getBrEmbed(session, showCoords = true) {
+const tipoBr = session.brType || 'ciudad';
+const tipoNombre = tipoBr === 'ciudad' ? 'BR Ciudad' : tipoBr === 'cayo' ? 'BR Cayo' : 'Rey del Crimen';
+const emojiTipo = tipoBr === 'ciudad' ? '🏢' : tipoBr === 'cayo' ? '🏝️' : '👑';
+let desc = `**${emojiTipo} ${tipoNombre}**\n\n`;
+desc += `🦁 **Leones:** ${session.staff.length}\n`;
+desc += `📊 **Facciones asignadas:** ${session.brAssignments ? Object.values(session.brAssignments).flat().length : 0}\n\n`;
+desc += `**📋 Asignaciones:**\n`;
+if (session.brAssignments) {
+for (const [leonId, faccionesAsignadas] of Object.entries(session.brAssignments)) {
+desc += `<@${leonId}>:\n`;
+const faccionesList = Array.isArray(faccionesAsignadas) ? faccionesAsignadas : [faccionesAsignadas];
+for (const fk of faccionesList) {
+const faccion = getFaccionesBr()[fk];
+const estadoSede = session.brStatus?.[leonId]?.[fk] || 'pendiente';
+let estadoEmoji = '⏳';
+if (estadoSede === 'voy') estadoEmoji = '✅';
+else if (estadoSede === 'novoy') estadoEmoji = '❌';
+else if (estadoSede === 'tepeado') estadoEmoji = '🔪';
+const coords = showCoords && faccion ? (tipoBr === 'ciudad' ? faccion.coords_br_ciudad : tipoBr === 'cayo' ? faccion.coords_br_cayo : faccion.coords_br_rey) : null;
+desc += `   ${estadoEmoji} ${faccion?.emoji || ''} ${faccion?.nombre || fk}${coords ? ` (${coords})` : ''}\n`;
+if ((tipoBr === 'ciudad' || tipoBr === 'cayo') && session.brZones && session.brZones[fk] && session.brZones[fk].length > 0) {
+const zone = session.brZones[fk][0];
+desc += `      🗺️ Zona de ${faccion?.nombre || fk}: \`${zone.coords}\`\n`;
+}
+}
+desc += '\n';
+}
+}
+return new EmbedBuilder()
+.setTitle(`${emojiTipo} GESTOR DE ${tipoNombre.toUpperCase()}`)
+.setColor(0x00FF00)
+.setDescription(desc);
+}
+function getBrPanelRows(session, sessionId) {
+const row1 = new ActionRowBuilder();
+row1.addComponents(
+new ButtonBuilder().setCustomId(`br1_${sessionId}`).setLabel('✅ Sede IRA').setStyle(ButtonStyle.Success),
+new ButtonBuilder().setCustomId(`br2_${sessionId}`).setLabel('❌ Sede NO IRA').setStyle(ButtonStyle.Danger),
+new ButtonBuilder().setCustomId(`br3_${sessionId}`).setLabel('🔪 Tepeada').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`br4_${sessionId}`).setLabel('🔄 Actualizar').setStyle(ButtonStyle.Secondary)
+);
+const row2 = new ActionRowBuilder();
+row2.addComponents(
+new ButtonBuilder().setCustomId(`br5_${sessionId}`).setLabel('➕ Agregar León').setStyle(ButtonStyle.Secondary),
+new ButtonBuilder().setCustomId(`br7_${sessionId}`).setLabel('❌ Borrar León').setStyle(ButtonStyle.Danger),
+new ButtonBuilder().setCustomId(`br6_${sessionId}`).setLabel('✅ Finalizar BR').setStyle(ButtonStyle.Danger)
+);
+return [row1, row2];
 }
 function createMasterPanelEmbed(session) {
 const defName = session.teamA.role === 'Defensa' ? session.teamA.name : session.teamB.name;
@@ -277,6 +391,529 @@ const embed = new EmbedBuilder()
 .setFooter({ text: `${assaults.length} asalto(s) registrado(s)` });
 return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
+if (interaction.isButton() && interaction.customId === 'btn_br_ciudad_iniciar') {
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId('br_seleccionar_staff_ciudad')
+.setPlaceholder('🦁 Selecciona los Leones participantes')
+.setMinValues(1)
+.setMaxValues(25);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+content: '🏢 **BR CIUDAD** - Selecciona los Leones que participarán:',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_br_cayo_iniciar') {
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId('br_seleccionar_staff_cayo')
+.setPlaceholder('🦁 Selecciona los Leones participantes')
+.setMinValues(1)
+.setMaxValues(25);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+content: '🏝️ **BR CAYO** - Selecciona los Leones que participarán:',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isButton() && interaction.customId === 'btn_rey_crimen_iniciar') {
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId('br_seleccionar_staff_rey')
+.setPlaceholder('🦁 Selecciona los Leones participantes')
+.setMinValues(1)
+.setMaxValues(25);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+content: '👑 **REY DEL CRIMEN** - Selecciona los Leones que participarán:',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isUserSelectMenu() && interaction.customId === 'br_seleccionar_staff_ciudad') {
+await interaction.deferReply({ ephemeral: true });
+const selectedUsers = Array.from(interaction.users.values()).filter(u => !u.bot);
+let leonIds = selectedUsers.map(u => u.id);
+if (!leonIds.includes(interaction.user.id)) {
+leonIds.unshift(interaction.user.id);
+}
+const faccionesPorPersona = Math.floor(29 / leonIds.length);
+const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const allFactionKeys = Object.values(assignments).flat();
+const zoneAssignments = assignRandomZones(allFactionKeys, 'ciudad');
+const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+const session = {
+id: sessionId,
+staff: leonIds,
+brType: 'ciudad',
+brAssignments: assignments,
+brZones: zoneAssignments,
+brStatus: {},
+isBicicleta: false,
+sede: 'BR Ciudad',
+creatorId: interaction.user.id
+};
+sessionManager.createSession(sessionId, {
+sede: 'BR Ciudad',
+defenders: 'BR',
+attackers: 'BR',
+capacity: leonIds.length + ' vs ' + leonIds.length,
+staff: leonIds,
+isBicicleta: false,
+subtype: 'br_ciudad',
+creatorId: interaction.user.id
+});
+session.subtype = 'br_ciudad';
+session.history = [];
+sessionManager.updateSession(sessionId, session);
+const creatorName = interaction.user.globalName || interaction.user.username;
+const staffList = leonIds.map(id => `<@${id}>`).join(', ');
+const embedPublic = new EmbedBuilder()
+.setColor(0xFFA500)
+.setAuthor({
+name: 'NUEVO BR CIUDAD REGISTRADO',
+iconURL: 'https://cdn.discordapp.com/emojis/1053421111624646736.webp'
+})
+.setTitle(`🏢 BR CIUDAD: BR Ciudad`)
+.setDescription(
+`🦁 **Leones Cargados:** ${staffList}\n\n` +
+`⚡ **REGLAS RÁPIDAS — BR CIUDAD** ⚡\n` +
+`1️⃣ Solo los leones pueden acceder al panel.\n` +
+`2️⃣ Confirma las sedes asignadas con los botones.\n` +
+`3️⃣ Cada león tiene ${faccionesPorPersona} sedes a su cargo.\n` +
+`4️⃣ Usa los botones para confirmar asistencia o tepear.`
+)
+.setFooter({ text: `Panel ID: #${sessionId.slice(-5)} • Registrado por ${creatorName}`, iconURL: interaction.user.displayAvatarURL() });
+const btnVerPanel = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId(`br_ver_panel_${sessionId}`)
+.setLabel(`👁️ Ver Panel de ${creatorName}`)
+.setStyle(ButtonStyle.Secondary)
+);
+await interaction.editReply({ content: '✅ Organizadores confirmados. Generando panel...', components: [], embeds: [] });
+const msg = await interaction.channel.send({ embeds: [embedPublic], components: [btnVerPanel] });
+session.announcementMsgId = msg.id;
+session.announcementChannelId = msg.channelId;
+sessionManager.updateSession(sessionId, session);
+return;
+}
+if (interaction.isUserSelectMenu() && interaction.customId === 'br_seleccionar_staff_cayo') {
+await interaction.deferReply({ ephemeral: true });
+const selectedUsers = Array.from(interaction.users.values()).filter(u => !u.bot);
+let leonIds = selectedUsers.map(u => u.id);
+if (!leonIds.includes(interaction.user.id)) {
+leonIds.unshift(interaction.user.id);
+}
+const faccionesPorPersona = Math.floor(29 / leonIds.length);
+const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const allFactionKeys = Object.values(assignments).flat();
+const zoneAssignments = assignRandomZones(allFactionKeys, 'cayo');
+const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+const session = {
+id: sessionId,
+staff: leonIds,
+brType: 'cayo',
+brAssignments: assignments,
+brZones: zoneAssignments,
+brStatus: {},
+isBicicleta: false,
+sede: 'BR Cayo',
+creatorId: interaction.user.id
+};
+sessionManager.createSession(sessionId, {
+sede: 'BR Cayo',
+defenders: 'BR',
+attackers: 'BR',
+capacity: leonIds.length + ' vs ' + leonIds.length,
+staff: leonIds,
+isBicicleta: false,
+subtype: 'br_cayo',
+creatorId: interaction.user.id
+});
+session.subtype = 'br_cayo';
+session.history = [];
+sessionManager.updateSession(sessionId, session);
+const creatorName = interaction.user.globalName || interaction.user.username;
+const staffList = leonIds.map(id => `<@${id}>`).join(', ');
+const embedPublic = new EmbedBuilder()
+.setColor(0xFFA500)
+.setAuthor({
+name: 'NUEVO BR CAYO REGISTRADO',
+iconURL: 'https://cdn.discordapp.com/emojis/1053421111624646736.webp'
+})
+.setTitle(`🏝️ BR CAYO PERLAS: BR Cayo`)
+.setDescription(
+`🦁 **Leones Cargados:** ${staffList}\n\n` +
+`⚡ **REGLAS RÁPIDAS — BR CAYO** ⚡\n` +
+`1️⃣ Solo los leones pueden acceder al panel.\n` +
+`2️⃣ Confirma las sedes asignadas con los botones.\n` +
+`3️⃣ Cada león tiene ${faccionesPorPersona} sedes a su cargo.\n` +
+`4️⃣ Usa los botones para confirmar asistencia o tepear.`
+)
+.setFooter({ text: `Panel ID: #${sessionId.slice(-5)} • Registrado por ${creatorName}`, iconURL: interaction.user.displayAvatarURL() });
+const btnVerPanel = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId(`br_ver_panel_${sessionId}`)
+.setLabel(`👁️ Ver Panel de ${creatorName}`)
+.setStyle(ButtonStyle.Secondary)
+);
+await interaction.editReply({ content: '✅ Organizadores confirmados. Generando panel...', components: [], embeds: [] });
+const msg = await interaction.channel.send({ embeds: [embedPublic], components: [btnVerPanel] });
+session.announcementMsgId = msg.id;
+session.announcementChannelId = msg.channelId;
+sessionManager.updateSession(sessionId, session);
+return;
+}
+if (interaction.isUserSelectMenu() && interaction.customId === 'br_seleccionar_staff_rey') {
+await interaction.deferReply({ ephemeral: true });
+const selectedUsers = Array.from(interaction.users.values()).filter(u => !u.bot);
+let leonIds = selectedUsers.map(u => u.id);
+if (!leonIds.includes(interaction.user.id)) {
+leonIds.unshift(interaction.user.id);
+}
+const faccionesPorPersona = Math.floor(29 / leonIds.length);
+const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+const session = {
+id: sessionId,
+staff: leonIds,
+brType: 'rey',
+brAssignments: assignments,
+brStatus: {},
+isBicicleta: false,
+sede: 'Rey del Crimen',
+creatorId: interaction.user.id
+};
+sessionManager.createSession(sessionId, {
+sede: 'Rey del Crimen',
+defenders: 'BR',
+attackers: 'BR',
+capacity: leonIds.length + ' vs ' + leonIds.length,
+staff: leonIds,
+isBicicleta: false,
+subtype: 'br_rey',
+creatorId: interaction.user.id
+});
+session.subtype = 'br_rey';
+session.history = [];
+sessionManager.updateSession(sessionId, session);
+const creatorName = interaction.user.globalName || interaction.user.username;
+const staffList = leonIds.map(id => `<@${id}>`).join(', ');
+const embedPublic = new EmbedBuilder()
+.setColor(0xFFA500)
+.setAuthor({
+name: 'NUEVO REY DEL CRIMEN REGISTRADO',
+iconURL: 'https://cdn.discordapp.com/emojis/1053421111624646736.webp'
+})
+.setTitle(`👑 REY DEL CRIMEN: Rey del Crimen`)
+.setDescription(
+`🦁 **Leones Cargados:** ${staffList}\n\n` +
+`⚡ **REGLAS RÁPIDAS — REY DEL CRIMEN** ⚡\n` +
+`1️⃣ Solo los leones pueden acceder al panel.\n` +
+`2️⃣ Confirma las sedes asignadas con los botones.\n` +
+`3️⃣ Cada león tiene ${faccionesPorPersona} sedes a su cargo.\n` +
+`4️⃣ Usa los botones para confirmar asistencia o tepear.`
+)
+.setFooter({ text: `Panel ID: #${sessionId.slice(-5)} • Registrado por ${creatorName}`, iconURL: interaction.user.displayAvatarURL() });
+const btnVerPanel = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId(`br_ver_panel_${sessionId}`)
+.setLabel(`👁️ Ver Panel de ${creatorName}`)
+.setStyle(ButtonStyle.Secondary)
+);
+await interaction.editReply({ content: '✅ Organizadores confirmados. Generando panel...', components: [], embeds: [] });
+const msg = await interaction.channel.send({ embeds: [embedPublic], components: [btnVerPanel] });
+session.announcementMsgId = msg.id;
+session.announcementChannelId = msg.channelId;
+sessionManager.updateSession(sessionId, session);
+return;
+}
+if (interaction.isButton() && interaction.customId.startsWith('br1_')) {
+const sessionId = interaction.customId.replace('br1_', '');
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+const misFacciones = session.brAssignments?.[interaction.user.id] || [];
+if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
+return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
+}
+const opciones = misFacciones.map(fk => {
+const fac = getFaccionesBr()[fk];
+return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
+});
+const select = new StringSelectMenuBuilder()
+.setCustomId('br_confirmar_voy')
+.setPlaceholder('Selecciona la sede que confirmarás')
+.setMinValues(1)
+.setMaxValues(1);
+opciones.slice(0, 25).forEach(opt => select.addOptions(new StringSelectMenuOptionBuilder().setLabel(opt.label).setValue(opt.value)));
+const row = new ActionRowBuilder().addComponents(select);
+return interaction.reply({ content: '✅ Selecciona la sede que IRÁ al BR:', components: [row], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'br_confirmar_voy') {
+const value = interaction.values[0];
+const firstUnderscore = value.indexOf('_');
+const sessionId = value.substring(0, firstUnderscore);
+const faccionKey = value.substring(firstUnderscore + 1);
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ Sesión no encontrada.', components: [] });
+session.brStatus = session.brStatus || {};
+session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
+session.brStatus[interaction.user.id][faccionKey] = 'voy';
+sessionManager.updateSession(sessionId, session);
+const fac = getFaccionesBr()[faccionKey];
+await interaction.update({ content: `✅ Confirmado: **${fac?.nombre || faccionKey}** SÍ irá al BR`, components: [] });
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br2_')) {
+const sessionId = interaction.customId.replace('br2_', '');
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+const misFacciones = session.brAssignments?.[interaction.user.id] || [];
+if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
+return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
+}
+const opciones = misFacciones.map(fk => {
+const fac = getFaccionesBr()[fk];
+return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
+});
+const select = new StringSelectMenuBuilder()
+.setCustomId('br_confirmar_novoy')
+.setPlaceholder('Selecciona la sede que NO irá al BR')
+.setMinValues(1)
+.setMaxValues(1);
+opciones.slice(0, 25).forEach(opt => select.addOptions(new StringSelectMenuOptionBuilder().setLabel(opt.label).setValue(opt.value)));
+const row = new ActionRowBuilder().addComponents(select);
+return interaction.reply({ content: '❌ Selecciona la sede que NO irá al BR:', components: [row], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'br_confirmar_novoy') {
+const value = interaction.values[0];
+const firstUnderscore = value.indexOf('_');
+const sessionId = value.substring(0, firstUnderscore);
+const faccionKey = value.substring(firstUnderscore + 1);
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ Sesión no encontrada.', components: [] });
+session.brStatus = session.brStatus || {};
+session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
+session.brStatus[interaction.user.id][faccionKey] = 'novoy';
+sessionManager.updateSession(sessionId, session);
+const fac = getFaccionesBr()[faccionKey];
+await interaction.update({ content: `❌ Confirmado: **${fac?.nombre || faccionKey}** NO irá al BR`, components: [] });
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br3_')) {
+const sessionId = interaction.customId.replace('br3_', '');
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+const misFacciones = session.brAssignments?.[interaction.user.id] || [];
+if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
+return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
+}
+const opciones = misFacciones.map(fk => {
+const fac = getFaccionesBr()[fk];
+return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
+});
+const select = new StringSelectMenuBuilder()
+.setCustomId('br_confirmar_tepeado')
+.setPlaceholder('Selecciona la sede donde te tepearon')
+.setMinValues(1)
+.setMaxValues(1);
+opciones.slice(0, 25).forEach(opt => select.addOptions(new StringSelectMenuOptionBuilder().setLabel(opt.label).setValue(opt.value)));
+const row = new ActionRowBuilder().addComponents(select);
+return interaction.reply({ content: '🔪 Selecciona la sede que fue TEPEADA (enviada al mundo royale):', components: [row], flags: MessageFlags.Ephemeral });
+}
+if (interaction.isStringSelectMenu() && interaction.customId === 'br_confirmar_tepeado') {
+const value = interaction.values[0];
+const firstUnderscore = value.indexOf('_');
+const sessionId = value.substring(0, firstUnderscore);
+const faccionKey = value.substring(firstUnderscore + 1);
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ Sesión no encontrada.', components: [] });
+session.brStatus = session.brStatus || {};
+session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
+session.brStatus[interaction.user.id][faccionKey] = 'tepeado';
+sessionManager.updateSession(sessionId, session);
+const fac = getFaccionesBr()[faccionKey];
+await interaction.update({ content: `🔪 **${fac?.nombre || faccionKey}** ha sido TEPEADA (enviada al mundo royale)`, components: [] });
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br4_')) {
+const sessionId = interaction.customId.replace('br4_', '');
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.update({ embeds: [embed], components: rows });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br5_')) {
+const sessionId = interaction.customId.replace('br5_', '');
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId(`br_add_staff_${sessionId}`)
+.setPlaceholder('Selecciona un León')
+.setMinValues(1)
+.setMaxValues(10);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+content: '🦁 Selecciona el León a agregar:',
+components: [row],
+flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isUserSelectMenu() && interaction.customId.startsWith('br_add_staff_')) {
+const sessionId = interaction.customId.replace('br_add_staff_', '');
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ Sesión no encontrada.', components: [] });
+const newUsers = Array.from(interaction.users.values()).filter(u => !u.bot);
+const newLeons = newUsers.map(u => u.id).filter(id => !session.staff.includes(id));
+if (newLeons.length > 0) {
+const allFactionKeys = Object.keys(getFaccionesBr());
+const shuffled = shuffleArray([...allFactionKeys]);
+const newStaff = [...session.staff, ...newLeons];
+const perLeon = Math.floor(shuffled.length / newStaff.length);
+const remainder = shuffled.length % newStaff.length;
+session.brAssignments = {};
+newStaff.forEach((leonId, index) => {
+const start = index * perLeon + Math.min(index, remainder);
+const end = start + perLeon + (index < remainder ? 1 : 0);
+session.brAssignments[leonId] = shuffled.slice(start, end);
+});
+session.staff = newStaff;
+const brType = session.brType || 'ciudad';
+if ((brType === 'ciudad' || brType === 'cayo') && session.brAssignments) {
+const allAssignedFactions = Object.values(session.brAssignments).flat();
+session.brZones = assignRandomZones(allAssignedFactions, brType);
+}
+sessionManager.updateSession(sessionId, session);
+}
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.update({ embeds: [embed], components: rows });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br7_')) {
+const sessionId = interaction.customId.replace('br7_', '');
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+if (interaction.user.id !== session.creatorId) {
+  return interaction.reply({ content: '❌ Solo el creador del panel puede borrar leones.', flags: MessageFlags.Ephemeral });
+}
+const userSelect = new UserSelectMenuBuilder()
+.setCustomId(`br_remove_staff_${sessionId}`)
+.setPlaceholder('Selecciona el León a eliminar')
+.setMinValues(1)
+.setMaxValues(1);
+const row = new ActionRowBuilder().addComponents(userSelect);
+return interaction.reply({
+  content: '❌ Selecciona el León a eliminar:',
+  components: [row],
+  flags: MessageFlags.Ephemeral
+});
+}
+if (interaction.isUserSelectMenu() && interaction.customId.startsWith('br_remove_staff_')) {
+const sessionId = interaction.customId.replace('br_remove_staff_', '');
+let session = sessionManager.getSession(sessionId);
+if (!session) return interaction.update({ content: '❌ Sesión no encontrada.', components: [] });
+const selectedUsers = Array.from(interaction.users.values());
+const removedIds = selectedUsers.map(u => u.id);
+session.staff = session.staff.filter(id => !removedIds.includes(id));
+if (session.staff.length > 0) {
+const allFactionKeys = Object.keys(getFaccionesBr());
+const shuffled = shuffleArray([...allFactionKeys]);
+const perLeon = Math.floor(shuffled.length / session.staff.length);
+const remainder = shuffled.length % session.staff.length;
+session.brAssignments = {};
+session.staff.forEach((leonId, index) => {
+const start = index * perLeon + Math.min(index, remainder);
+const end = start + perLeon + (index < remainder ? 1 : 0);
+session.brAssignments[leonId] = shuffled.slice(start, end);
+});
+const brType = session.brType || 'ciudad';
+if ((brType === 'ciudad' || brType === 'cayo') && session.brAssignments) {
+const allAssignedFactions = Object.values(session.brAssignments).flat();
+session.brZones = assignRandomZones(allAssignedFactions, brType);
+}
+} else {
+session.brAssignments = {};
+session.brZones = {};
+}
+sessionManager.updateSession(sessionId, session);
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.update({ embeds: [embed], components: rows });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br_ver_panel_')) {
+const sessionId = interaction.customId.replace('br_ver_panel_', '');
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: 'El evento ya finalizó o fue cancelado.', flags: MessageFlags.Ephemeral });
+const isStaff = session.staff?.includes(interaction.user.id);
+if (!isStaff) {
+return interaction.reply({ content: '❌ No cuentas con permisos. Solo los leones asignados pueden ver el panel.', flags: MessageFlags.Ephemeral });
+}
+const embed = getBrEmbed(session, true);
+const rows = getBrPanelRows(session, sessionId);
+return interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+}
+if (interaction.isButton() && interaction.customId.startsWith('br6_')) {
+const sessionId = interaction.customId.replace('br6_', '');
+const session = sessionManager.getSession(sessionId);
+if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
+
+const isReyDelCrimen = session.brType === 'rey' || session.sede?.toLowerCase().includes('rey');
+if (isReyDelCrimen) {
+  const modal = new ModalBuilder()
+    .setCustomId(`rey_ganador_modal_${sessionId}`)
+    .setTitle('👑 Rey del Crimen - Ganador');
+  const winnerInput = new TextInputBuilder()
+    .setCustomId('rey_ganador_input')
+    .setLabel('Nombre del ganador')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Ej: Facción Ganadora')
+    .setRequired(true);
+  const row = new ActionRowBuilder().addComponents(winnerInput);
+  modal.addComponents(row);
+  return interaction.showModal(modal);
+}
+
+await interaction.deferReply({ ephemeral: true });
+
+const saveResult = await assaultPersistence.saveBrEvent(session, sessionId);
+
+if (session.announcementMsgId && session.announcementChannelId) {
+  try {
+    const channel = await interaction.client.channels.fetch(session.announcementChannelId);
+    if (channel) {
+      const msg = await channel.messages.fetch(session.announcementMsgId);
+      if (msg) await msg.delete();
+    }
+  } catch (err) {
+    console.error('Error borrando mensaje de BR:', err);
+  }
+}
+
+const sedeName = session.sede || 'BR';
+const brTypeLabel = session.brType === 'rey' ? 'REY DEL CRIMEN' : session.brType === 'cayo' ? 'BR CAYO PERLAS' : 'BR CIUDAD';
+const creator = session.creatorId ? `<@${session.creatorId}>` : 'Desconocido';
+const staffList = session.staff ? session.staff.map(id => `<@${id}>`).join(', ') : 'Sin staff';
+
+sessionManager.deleteSession(sessionId);
+
+let saveNote = '';
+if (saveResult && saveResult.ok) {
+  saveNote = `\n📅 **Registrado:** Semana ${saveResult.isoYearWeek}`;
+}
+
+return interaction.editReply({ 
+  content: `✅ **BR FINALIZADO**\n` +
+  `📌 ${brTypeLabel}: ${sedeName}\n` +
+  `🦁 Leones: ${staffList}\n\n` +
+  `Panel ID: #${sessionId} • Registrado por ${creator}` +
+  saveNote
+});
+}
 if (interaction.isButton() && interaction.customId === 'btn_ranking_semana') {
 const { getRanking, getISOYearWeekString, getWeekNumber } = require('../../src/services/assaultPersistence');
 const weekNum = getWeekNumber();
@@ -318,7 +955,9 @@ if (interaction.isButton() && interaction.customId === 'btn_buscar_semana') {
 const { getRanking } = require('../../src/services/assaultPersistence');
 const currentYear = new Date().getFullYear();
 const options = [];
-for (let i = 1; i <= 52; i++) {
+const currentWeek = Math.min(52, new Date().getWeek ? new Date().getWeek() : 14);
+const startWeek = Math.max(1, currentWeek - 24);
+for (let i = startWeek; i <= currentWeek; i++) {
 const weekStr = `${currentYear}-W${String(i).padStart(2, '0')}`;
 options.push({ label: `Semana ${i}`, value: weekStr });
 }
@@ -327,7 +966,7 @@ const selectMenu = new StringSelectMenuBuilder()
 .setPlaceholder('Selecciona una semana')
 .setMinValues(1)
 .setMaxValues(1);
-options.forEach(opt => selectMenu.addOptions(opt));
+options.slice(0, 25).forEach(opt => selectMenu.addOptions(opt));
 const row = new ActionRowBuilder().addComponents(selectMenu);
 return interaction.reply({ content: '🔍 **Selecciona la semana que quieres ver:**', components: [row], flags: MessageFlags.Ephemeral });
 }
@@ -434,20 +1073,20 @@ new ActionRowBuilder().addComponents(atkCoords)
 );
 return interaction.showModal(modal);
 }
+const sedesDb = sedesManager.getAll();
+const sedeOptions = sedesDb.length > 0
+? sedesDb.map(s => new StringSelectMenuOptionBuilder()
+    .setLabel(s.nombre)
+    .setDescription(`Cap: ${s.capacidad}`)
+    .setEmoji(s.emoji || '🏰')
+    .setValue(s.key))
+: [new StringSelectMenuOptionBuilder()
+    .setLabel('No hay sedes — usa Agregar Sede primero')
+    .setValue('none')];
 const selectSede = new StringSelectMenuBuilder()
 .setCustomId('asalto_seleccionar_sede')
-.setPlaceholder('🏰 Selecciona la Sede (Pag 1/1)')
-.addOptions(
-Object.entries(sedesConfig)
-.sort((a, b) => a[1].nombre.localeCompare(b[1].nombre))
-.map(([key, data]) => {
-return new StringSelectMenuOptionBuilder()
-.setLabel(data.nombre)
-.setDescription(`Cap: ${data.capacidad}`)
-.setEmoji(data.emoji || '🏰')
-.setValue(key);
-})
-);
+.setPlaceholder('🏰 Selecciona la Sede')
+.addOptions(sedeOptions);
 const row = new ActionRowBuilder().addComponents(selectSede);
 const subtypeLabel = subtype ? subtype.toUpperCase() : 'NORMAL';
 return interaction.update({
@@ -534,7 +1173,10 @@ components: [row1, row2]
 }
 if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_sede') {
 const sedeId = interaction.values[0];
-const sedeData = sedesConfig[sedeId];
+if (sedeId === 'none') return interaction.reply({ content: '❌ No hay sedes disponibles. Agrega una primero con "Gestionar Sedes".', flags: MessageFlags.Ephemeral });
+const sedesDb = sedesManager.getAll();
+const sedeDb = sedesDb.find(s => s.key === sedeId);
+const sedeData = sedeDb || sedesConfig[sedeId];
 const setup = pendingSetups.get(interaction.user.id) || {};
 setup.sedeId = sedeId;
 setup.sedeData = sedeData;
@@ -702,6 +1344,115 @@ return interaction.reply(responseData);
 }
 }
 }
+if (interaction.isModalSubmit() && interaction.customId.startsWith('rey_ganador_modal_')) {
+  const sessionId = interaction.customId.split('_').pop();
+  const session = sessionManager.getSession(sessionId);
+  if (!session) return interaction.update({ content: 'La sesión ya no existe.', components: [], embeds: [] });
+
+  const winner = interaction.fields.getTextInputValue('rey_ganador_input');
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const idFilePath = path.join(__dirname, '../../id discord.txt');
+    if (fs.existsSync(idFilePath)) {
+      const targetId = fs.readFileSync(idFilePath, 'utf8').trim();
+      const leonesList = session.staff ? session.staff.map(id => `<@${id}>`).join('\n') : 'Sin leones';
+      const targetUser = await interaction.client.users.fetch(targetId);
+      const now = new Date();
+      const fecha = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const hora = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      if (targetUser) {
+        const embedDm = new EmbedBuilder()
+          .setColor(0xFFD700)
+          .setTitle(`🦁 **Rey del Crimen Finalizado**`)
+          .setDescription(`👑 **Ganador:** ${winner}\n\n🦁 **Leones:**\n${leonesList}`)
+          .setFooter({ text: `📅 ${fecha} • 🕐 ${hora}` });
+        await targetUser.send({ embeds: [embedDm] });
+      }
+    }
+  } catch (err) {
+    console.error('Error enviando DM de leones:', err);
+  }
+
+  if (session.announcementMsgId && session.announcementChannelId) {
+    try {
+      const channel = await interaction.client.channels.fetch(session.announcementChannelId);
+      if (channel) {
+        const msg = await channel.messages.fetch(session.announcementMsgId);
+        if (msg) await msg.delete();
+      }
+    } catch (err) {
+      console.error('Error borrando mensaje de BR:', err);
+    }
+  }
+
+  const sedeName = session.sede || 'BR';
+  const creator = session.creatorId ? `<@${session.creatorId}>` : 'Desconocido';
+
+  const fs = require('fs');
+  const path = require('path');
+  const now = new Date();
+  const fecha = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth()+1).padStart(2, '0')}/${now.getFullYear()}`;
+  const hora = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const finalRCPath = path.join(__dirname, '../../Final Rey del crimen.txt');
+  let mensajeFinal = '';
+  try {
+    if (fs.existsSync(finalRCPath)) {
+      mensajeFinal = fs.readFileSync(finalRCPath, 'utf8');
+      let sedesQueVan = [];
+  if (session.brStatus) {
+    for (const userId in session.brStatus) {
+      for (const facKey in session.brStatus[userId]) {
+        if (session.brStatus[userId][facKey] === 'tepeado') {
+          const fac = getFaccionesBr()[facKey];
+          if (fac && !sedesQueVan.includes(fac.nombre)) {
+            sedesQueVan.push(fac.nombre);
+          }
+        }
+      }
+    }
+  }
+  const sedesTexto = sedesQueVan.length > 0 ? sedesQueVan.join(', ') : (session.sede || 'Rey del Crimen');
+
+  mensajeFinal = mensajeFinal
+        .replace('15/03/2026', fecha)
+        .replace('***♛ GLYZZUP ♛***', `***♛ ${winner.toUpperCase()} ♛***`)
+        .replace('23:10', hora)
+        .replace('19', sedesTexto);
+
+      if (session.staff && session.staff.length > 0) {
+        const leonesList = session.staff.map(id => `<@${id}>`).join('\n');
+        mensajeFinal = mensajeFinal.replace(/> \*— Sin registros —\*/, `> ${leonesList}`);
+      }
+    } else {
+      console.log('Archivo no encontrado:', finalRCPath);
+    }
+  } catch (err) {
+    console.error('Error leyendo Final Rey del crimen.txt:', err);
+  }
+
+  try {
+    const targetChannel = await interaction.client.channels.fetch('1488337822556491939');
+    if (targetChannel) {
+      await targetChannel.send(mensajeFinal);
+    }
+  } catch (err) {
+    console.error('Error enviando al canal:', err);
+  }
+
+  await interaction.reply({
+    content: `✅ **REY DEL CRIMEN FINALIZADO**\n\n👑 **GANADOR:** ${winner}\n📌 Sede: ${sedeName}`,
+    flags: MessageFlags.Ephemeral
+  });
+
+  await assaultPersistence.saveBrEvent(session, sessionId, { winner });
+
+  sessionManager.deleteSession(sessionId);
+  return;
+}
+
 if (interaction.isModalSubmit() && interaction.customId.startsWith('asalto_finalizar_modal_')) {
 const sessionId = interaction.customId.split('_').pop();
 const session = sessionManager.getSession(sessionId);
@@ -759,19 +1510,11 @@ await interaction.followUp({ content: `✅ Panel cerrado correctamente por <@${i
 await interaction.followUp({ content: finalMessage, flags: MessageFlags.Ephemeral });
 await interaction.followUp({ content: auditText, flags: MessageFlags.Ephemeral });
 if (dbSaveResult && dbSaveResult.ok) {
-const localLine = dbSaveResult.localRelative
-? `\n📁 **Guardado en:** LOCALREGISTRO/${dbSaveResult.localRelative}`
-: '';
-const mysqlLine = dbSaveResult.mysql
-? '\n🗄️ **MySQL:** Guardado correctamente.'
-: '\n💾 **Nota:** MySQL no disponible. Registro solo en carpeta local.';
 await interaction.followUp({
 content:
 `✅ **ASALTO REGISTRADO CORRECTAMENTE**\n` +
 `📅 **Semana:** ${dbSaveResult.isoYearWeek}\n` +
-`🆔 **ID:** ${dbSaveResult.matchId}` +
-localLine +
-mysqlLine,
+`🆔 **ID:** ${dbSaveResult.matchId}`,
 flags: MessageFlags.Ephemeral
 });
 } else if (!session.isBicicleta) {
@@ -1001,7 +1744,7 @@ sessionManager.updateSession(sessionId, session);
 const embed = createMasterPanelEmbed(session);
 return interaction.update({ embeds: [embed], components: getMasterPanelRows(session, sessionId) });
 } else {
-return interaction.followUp({ content: 'No hay más acciones en el historial para deshacer.', flags: MessageFlags.Ephemeral });
+return interaction.reply({ content: 'No hay más acciones en el historial para deshacer.', flags: MessageFlags.Ephemeral });
 }
 }
 if (actionType === 'btn_win_a' || actionType === 'btn_win_b') {

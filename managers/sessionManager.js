@@ -72,10 +72,13 @@ return deleted;
 }
 addStaff(channelId, userId) {
 const session = this.getSession(channelId);
-if (session && !session.staff.includes(userId)) {
+if (session) {
+if (!Array.isArray(session.staff)) session.staff = [];
+if (!session.staff.includes(userId)) {
 session.staff.push(userId);
 this.updateSession(channelId, session);
 return true;
+}
 }
 return false;
 }

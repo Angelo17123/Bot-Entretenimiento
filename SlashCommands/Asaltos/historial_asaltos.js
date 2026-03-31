@@ -1,7 +1,11 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-const MySQLMatchRepository = require("../../src/infrastructure/database/mysql/MySQLMatchRepository");
-const { resolveWeekQuery, readLocalWeek, getWeekNumber } = require("../../src/services/assaultPersistence");
+const JsonMatchRepository = require("../../src/infrastructure/database/json/JsonMatchRepository");
+const { resolveWeekQuery, getWeekNumber } = require("../../src/services/assaultPersistence");
 function formatLine(i, r) {
+const tipo = r.event_subtype === 'rey_del_crimen' ? '👑' :
+             r.event_subtype === 'br_cayo' ? '🏝️' :
+             r.event_subtype === 'br_ciudad' ? '🏢' :
+             r.event_subtype === 'bicicleta' ? '🚲' : '⚔️';
 const sub = r.event_subtype ? ` · ${r.event_subtype}` : "";
 const sede = r.sede_name;
 const def = r.def_name;
@@ -14,7 +18,7 @@ const creador = r.creatorId ? `<@${r.creatorId}>` : "Desconocido";
 const apoyo = r.staffApoyo && r.staffApoyo.length > 0
 ? `Apoyo: ${r.staffApoyo.map(id => `<@${id}>`).join(", ")}`
 : "";
-let line = `${i + 1}. **${sede}**${sub}\n`;
+let line = `${i + 1}. ${tipo} **${sede}**${sub}\n`;
 line += `   👤 Creador: ${creador}\n`;
 line += `   📅 Fecha: ${fecha}\n`;
 line += `   ⚔️ ${def} **${sd}-${sa}** ${atk} · 🏆 ${w}`;
@@ -24,7 +28,7 @@ return line;
 module.exports = {
 data: new SlashCommandBuilder()
 .setName("historial_asaltos")
-.setDescription("Lista asaltos a sede por semana ISO (LOCALREGISTRO y/o MySQL).")
+.setDescription("Lista eventos por semana (asaltos, BR, Rey del Crimen).")
 .addStringOption((o) =>
 o
 .setName("semana")
@@ -38,27 +42,18 @@ try {
 const raw = interaction.options.getString("semana");
 const week = resolveWeekQuery(raw);
 const weekNum = getWeekNumber(new Date(week.replace('-W', '-01')));
-let rows = readLocalWeek(week);
-let source = "LOCALREGISTRO";
-if (!rows.length && global.mysqlReady) {
-try {
-rows = await MySQLMatchRepository.getMatchesByIsoYearWeek(week);
-source = "MySQL";
-} catch (e) {
-console.error("historial_asaltos MySQL:", e);
-}
-}
+let rows = await JsonMatchRepository.getMatchesByIsoYearWeek(week);
 if (!rows.length) {
 return interaction.editReply({
-content: `No hay asalto(s) registrados para la **Semana ${weekNum}** (ni en \`LOCALREGISTRO\`${global.mysqlReady ? " ni en MySQL" : ""}).`,
+content: `No hay eventos registrados para la **Semana ${weekNum}**.`,
 });
 }
 const lines = rows.slice(0, 15).map((r, i) => formatLine(i, r));
 const embed = new EmbedBuilder()
-.setTitle(`📋 Asaltos — Semana ${weekNum}`)
+.setTitle(`📋 Eventos — Semana ${weekNum}`)
 .setColor(0x2b2d31)
 .setDescription(lines.join("\n").slice(0, 6000))
-.setFooter({ text: `${rows.length} registro(s) · ${source}` });
+.setFooter({ text: `${rows.length} registro(s) · JSON DB` });
 return interaction.editReply({ embeds: [embed] });
 } catch (err) {
 console.error("historial_asaltos:", err);
