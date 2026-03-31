@@ -1148,7 +1148,7 @@ const sedeOptions = sedesDb.length > 0
 const selectSede = new StringSelectMenuBuilder()
 .setCustomId('asalto_seleccionar_sede')
 .setPlaceholder('🏰 Selecciona la Sede')
-.addOptions(sedeOptions);
+.addOptions(sedeOptions.slice(0, 25));
 const row = new ActionRowBuilder().addComponents(selectSede);
 const subtypeLabel = subtype ? subtype.toUpperCase() : 'NORMAL';
 return interaction.update({
