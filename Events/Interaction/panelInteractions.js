@@ -1,18 +1,19 @@
 const { Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
 const sessionManager = require('../../managers/sessionManager');
-const sedesManager = require('../../src/infrastructure/database/json/SedesManager');
-const sedesConfig = require('../../config/sedes.json');
-const faccionesConfig = require('../../config/facciones.json');
+const PostgresSedesRepository = require('../../src/infrastructure/database/postgres/PostgresSedesRepository');
+const PostgresMatchRepository = require('../../src/infrastructure/database/postgres/PostgresMatchRepository');
+const PostgresFaccionesRepository = require('../../src/infrastructure/database/postgres/PostgresFaccionesRepository');
+const EMOJIS = require('../../src/constants/emojis');
 const assaultPersistence = require('../../src/services/assaultPersistence');
 const path = require('path');
 const fs = require('fs');
-function getFaccionesBr() {
-const fp = path.join(__dirname, '..', '..', 'config', 'facciones_br.json');
-try {
-return JSON.parse(fs.readFileSync(fp, 'utf8'));
-} catch {
-return {};
-}
+async function getFaccionesBr() {
+  const rows = await PostgresFaccionesRepository.getAllBr();
+  const map = {};
+  for (const r of rows) {
+    map[r.key] = { nombre: r.nombre, emoji: EMOJIS.faccionesBr[r.key] || '', coords: r.coords, coords_br_ciudad: r.coords_br_ciudad, coords_br_cayo: r.coords_br_cayo, coords_br_rey: r.coords_br_rey };
+  }
+  return map;
 }
 const finalMessages = [
 (sede, win, lose) => `🔥 CAOS Y GLORIA EN ${sede} 🔥\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n🏆 VICTORIA APLASTANTE DE ${win}\nEntraron, ejecutaron y dominaron. Una exhibición de fuerza y jerarquía.\nEl rival no tuvo respuesta ante tal despliegue de poder. 👑 💪\n\n⚔️ ${lose} RESISTIÓ\nA pesar de la tormenta, se mantuvieron firmes hasta el último aliento.\nHoy no fue su día, pero la guerra continúa.\n\n✨ El polvo se asienta y solo un nombre resuena:\n${win}. La historia la escriben los vencedores.`,
@@ -31,9 +32,9 @@ const pendingSetups = new Map();
 /**
 * Genera un StringSelectMenuBuilder paginado para las facciones (Límite 25 de Discord)
 */
-function getPaginatedFactionMenu(customId, placeholder, page = 0) {
-const allFactions = Object.entries(faccionesConfig)
-.sort((a, b) => a[1].nombre.localeCompare(b[1].nombre));
+async function getPaginatedFactionMenu(customId, placeholder, page = 0) {
+const allFactions = await PostgresFaccionesRepository.getAll();
+allFactions.sort((a, b) => a.nombre.localeCompare(b.nombre));
 const TOTAL_ITEMS = allFactions.length;
 const pageSize = 23;
 const totalPages = Math.ceil(TOTAL_ITEMS / pageSize);
@@ -41,10 +42,12 @@ const start = page * pageSize;
 const end = start + pageSize;
 const pagedFactions = allFactions.slice(start, end);
 const options = [];
-pagedFactions.forEach(([key, data]) => {
+pagedFactions.forEach((data) => {
+const emoji = EMOJIS.facciones[data.key] || '🏳️';
 options.push({
-label: `${data.emoji || '🏳️'} ${data.nombre}`,
-value: key
+label: data.nombre,
+value: data.key,
+emoji: emoji
 });
 });
 if (page < totalPages - 1) {
@@ -77,8 +80,9 @@ const j = Math.floor(Math.random() * (i + 1));
 }
 return array;
 }
-function assignLeonsToFactions(leonIds, faccionesPorPersona = 1) {
-const faccionesKeys = Object.keys(getFaccionesBr());
+async function assignLeonsToFactions(leonIds, faccionesPorPersona = 1) {
+const faccionesBr = await getFaccionesBr();
+const faccionesKeys = Object.keys(faccionesBr);
 const shuffledFacciones = shuffleArray([...faccionesKeys]);
 const assignments = {};
 const totalAsignar = leonIds.length * faccionesPorPersona;
@@ -109,7 +113,7 @@ coords: parts.slice(1).join(':').trim()
 })
 .filter(Boolean);
 }
-function assignRandomZones(factionKeys, brType) {
+async function assignRandomZones(factionKeys, brType) {
 const zones = getZonesFromFile(brType);
 if (zones.length === 0) return {};
 const shuffled = shuffleArray([...zones]);
@@ -123,7 +127,7 @@ zoneAssignments[fk] = shuffled.slice(start, end);
 });
 return zoneAssignments;
 }
-function getBrEmbed(session, showCoords = true) {
+async function getBrEmbed(session, showCoords = true) {
 const tipoBr = session.brType || 'ciudad';
 const tipoNombre = tipoBr === 'ciudad' ? 'BR Ciudad' : tipoBr === 'cayo' ? 'BR Cayo' : 'Rey del Crimen';
 const emojiTipo = tipoBr === 'ciudad' ? '🏢' : tipoBr === 'cayo' ? '🏝️' : '👑';
@@ -132,11 +136,12 @@ desc += `🦁 **Leones:** ${session.staff.length}\n`;
 desc += `📊 **Facciones asignadas:** ${session.brAssignments ? Object.values(session.brAssignments).flat().length : 0}\n\n`;
 desc += `**📋 Asignaciones:**\n`;
 if (session.brAssignments) {
+const faccionesBr = await getFaccionesBr();
 for (const [leonId, faccionesAsignadas] of Object.entries(session.brAssignments)) {
 desc += `<@${leonId}>:\n`;
 const faccionesList = Array.isArray(faccionesAsignadas) ? faccionesAsignadas : [faccionesAsignadas];
 for (const fk of faccionesList) {
-const faccion = getFaccionesBr()[fk];
+const faccion = faccionesBr[fk];
 const estadoSede = session.brStatus?.[leonId]?.[fk] || 'pendiente';
 let estadoEmoji = '⏳';
 if (estadoSede === 'voy') estadoEmoji = '✅';
@@ -499,10 +504,11 @@ let leonIds = selectedUsers.map(u => u.id);
 if (!leonIds.includes(interaction.user.id)) {
 leonIds.unshift(interaction.user.id);
 }
-const faccionesPorPersona = Math.floor(29 / leonIds.length);
-const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const faccionesBr = await getFaccionesBr();
+const faccionesPorPersona = Math.floor(Object.keys(faccionesBr).length / leonIds.length);
+const assignments = await assignLeonsToFactions(leonIds, faccionesPorPersona);
 const allFactionKeys = Object.values(assignments).flat();
-const zoneAssignments = assignRandomZones(allFactionKeys, 'ciudad');
+const zoneAssignments = await assignRandomZones(allFactionKeys, 'ciudad');
 const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
 const session = {
 id: sessionId,
@@ -566,10 +572,11 @@ let leonIds = selectedUsers.map(u => u.id);
 if (!leonIds.includes(interaction.user.id)) {
 leonIds.unshift(interaction.user.id);
 }
-const faccionesPorPersona = Math.floor(29 / leonIds.length);
-const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const faccionesBr = await getFaccionesBr();
+const faccionesPorPersona = Math.floor(Object.keys(faccionesBr).length / leonIds.length);
+const assignments = await assignLeonsToFactions(leonIds, faccionesPorPersona);
 const allFactionKeys = Object.values(assignments).flat();
-const zoneAssignments = assignRandomZones(allFactionKeys, 'cayo');
+const zoneAssignments = await assignRandomZones(allFactionKeys, 'cayo');
 const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
 const session = {
 id: sessionId,
@@ -633,8 +640,9 @@ let leonIds = selectedUsers.map(u => u.id);
 if (!leonIds.includes(interaction.user.id)) {
 leonIds.unshift(interaction.user.id);
 }
-const faccionesPorPersona = Math.floor(29 / leonIds.length);
-const assignments = assignLeonsToFactions(leonIds, faccionesPorPersona);
+const faccionesBr = await getFaccionesBr();
+const faccionesPorPersona = Math.floor(Object.keys(faccionesBr).length / leonIds.length);
+const assignments = await assignLeonsToFactions(leonIds, faccionesPorPersona);
 const sessionId = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
 const session = {
 id: sessionId,
@@ -698,8 +706,9 @@ const misFacciones = session.brAssignments?.[interaction.user.id] || [];
 if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
 return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
 }
+const faccionesBr = await getFaccionesBr();
 const opciones = misFacciones.map(fk => {
-const fac = getFaccionesBr()[fk];
+const fac = faccionesBr[fk];
 return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
 });
 const select = new StringSelectMenuBuilder()
@@ -722,9 +731,10 @@ session.brStatus = session.brStatus || {};
 session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
 session.brStatus[interaction.user.id][faccionKey] = 'voy';
 sessionManager.updateSession(sessionId, session);
-const fac = getFaccionesBr()[faccionKey];
+const faccionesBr = await getFaccionesBr();
+const fac = faccionesBr[faccionKey];
 await interaction.update({ content: `✅ Confirmado: **${fac?.nombre || faccionKey}** SÍ irá al BR`, components: [] });
-const embed = getBrEmbed(session, true);
+const embed = await getBrEmbed(session, true);
 const rows = getBrPanelRows(session, sessionId);
 return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
 }
@@ -736,8 +746,9 @@ const misFacciones = session.brAssignments?.[interaction.user.id] || [];
 if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
 return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
 }
+const faccionesBr = await getFaccionesBr();
 const opciones = misFacciones.map(fk => {
-const fac = getFaccionesBr()[fk];
+const fac = faccionesBr[fk];
 return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
 });
 const select = new StringSelectMenuBuilder()
@@ -760,9 +771,10 @@ session.brStatus = session.brStatus || {};
 session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
 session.brStatus[interaction.user.id][faccionKey] = 'novoy';
 sessionManager.updateSession(sessionId, session);
-const fac = getFaccionesBr()[faccionKey];
+const faccionesBr = await getFaccionesBr();
+const fac = faccionesBr[faccionKey];
 await interaction.update({ content: `❌ Confirmado: **${fac?.nombre || faccionKey}** NO irá al BR`, components: [] });
-const embed = getBrEmbed(session, true);
+const embed = await getBrEmbed(session, true);
 const rows = getBrPanelRows(session, sessionId);
 return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
 }
@@ -774,8 +786,9 @@ const misFacciones = session.brAssignments?.[interaction.user.id] || [];
 if (!Array.isArray(misFacciones) || misFacciones.length === 0) {
 return interaction.reply({ content: '❌ No tienes facciones asignadas.', flags: MessageFlags.Ephemeral });
 }
+const faccionesBr = await getFaccionesBr();
 const opciones = misFacciones.map(fk => {
-const fac = getFaccionesBr()[fk];
+const fac = faccionesBr[fk];
 return { label: `${fac?.emoji || ''} ${fac?.nombre || fk}`, value: `${sessionId}_${fk}` };
 });
 const select = new StringSelectMenuBuilder()
@@ -798,9 +811,10 @@ session.brStatus = session.brStatus || {};
 session.brStatus[interaction.user.id] = session.brStatus[interaction.user.id] || {};
 session.brStatus[interaction.user.id][faccionKey] = 'tepeado';
 sessionManager.updateSession(sessionId, session);
-const fac = getFaccionesBr()[faccionKey];
+const faccionesBr = await getFaccionesBr();
+const fac = faccionesBr[faccionKey];
 await interaction.update({ content: `🔪 **${fac?.nombre || faccionKey}** ha sido TEPEADA (enviada al mundo royale)`, components: [] });
-const embed = getBrEmbed(session, true);
+const embed = await getBrEmbed(session, true);
 const rows = getBrPanelRows(session, sessionId);
 return interaction.followUp({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
 }
@@ -808,7 +822,7 @@ if (interaction.isButton() && interaction.customId.startsWith('br4_')) {
 const sessionId = interaction.customId.replace('br4_', '');
 const session = sessionManager.getSession(sessionId);
 if (!session) return interaction.reply({ content: '❌ Sesión no encontrada.', flags: MessageFlags.Ephemeral });
-const embed = getBrEmbed(session, true);
+const embed = await getBrEmbed(session, true);
 const rows = getBrPanelRows(session, sessionId);
 return interaction.update({ embeds: [embed], components: rows });
 }
@@ -833,7 +847,8 @@ if (!session) return interaction.update({ content: '❌ Sesión no encontrada.',
 const newUsers = Array.from(interaction.users.values()).filter(u => !u.bot);
 const newLeons = newUsers.map(u => u.id).filter(id => !session.staff.includes(id));
 if (newLeons.length > 0) {
-const allFactionKeys = Object.keys(getFaccionesBr());
+const faccionesBr = await getFaccionesBr();
+const allFactionKeys = Object.keys(faccionesBr);
 const shuffled = shuffleArray([...allFactionKeys]);
 const newStaff = [...session.staff, ...newLeons];
 const perLeon = Math.floor(shuffled.length / newStaff.length);
@@ -848,11 +863,11 @@ session.staff = newStaff;
 const brType = session.brType || 'ciudad';
 if ((brType === 'ciudad' || brType === 'cayo') && session.brAssignments) {
 const allAssignedFactions = Object.values(session.brAssignments).flat();
-session.brZones = assignRandomZones(allAssignedFactions, brType);
+session.brZones = await assignRandomZones(allAssignedFactions, brType);
 }
 sessionManager.updateSession(sessionId, session);
 }
-const embed = getBrEmbed(session, true);
+const embed = await getBrEmbed(session, true);
 const rows = getBrPanelRows(session, sessionId);
 return interaction.update({ embeds: [embed], components: rows });
 }
@@ -883,7 +898,8 @@ const selectedUsers = Array.from(interaction.users.values());
 const removedIds = selectedUsers.map(u => u.id);
 session.staff = session.staff.filter(id => !removedIds.includes(id));
 if (session.staff.length > 0) {
-const allFactionKeys = Object.keys(getFaccionesBr());
+const faccionesBr = await getFaccionesBr();
+const allFactionKeys = Object.keys(faccionesBr);
 const shuffled = shuffleArray([...allFactionKeys]);
 const perLeon = Math.floor(shuffled.length / session.staff.length);
 const remainder = shuffled.length % session.staff.length;
@@ -896,7 +912,7 @@ session.brAssignments[leonId] = shuffled.slice(start, end);
 const brType = session.brType || 'ciudad';
 if ((brType === 'ciudad' || brType === 'cayo') && session.brAssignments) {
 const allAssignedFactions = Object.values(session.brAssignments).flat();
-session.brZones = assignRandomZones(allAssignedFactions, brType);
+session.brZones = await assignRandomZones(allAssignedFactions, brType);
 }
 } else {
 session.brAssignments = {};
@@ -1135,13 +1151,17 @@ new ActionRowBuilder().addComponents(atkCoords)
 );
 return interaction.showModal(modal);
 }
-const sedesDb = sedesManager.getAll();
+const sedesDb = await PostgresSedesRepository.getAll();
 const sedeOptions = sedesDb.length > 0
-? sedesDb.map(s => new StringSelectMenuOptionBuilder()
-    .setLabel(s.nombre)
-    .setDescription(`Cap: ${s.capacidad}`)
-    .setEmoji(s.emoji || '🏰')
-    .setValue(s.key))
+? sedesDb.map(s => {
+    const emojiKey = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const emoji = EMOJIS.sedes[emojiKey] || '🏰';
+    return new StringSelectMenuOptionBuilder()
+      .setLabel(s.name)
+      .setDescription(`Cap: ${s.capacidad}`)
+      .setEmoji(emoji)
+      .setValue(s.name);
+  })
 : [new StringSelectMenuOptionBuilder()
     .setLabel('No hay sedes — usa Agregar Sede primero')
     .setValue('none')];
@@ -1167,7 +1187,7 @@ ataque: interaction.fields.getTextInputValue('atk_coords')
 }
 };
 setup.isBicicleta = false;
-const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
+const selectDefensor = await getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
 const row1 = new ActionRowBuilder().addComponents(selectDefensor);
 const row2 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
@@ -1223,7 +1243,7 @@ ataque: "308.73, -2107.26, 17.65, 150.51"   // Equipo 2
 }
 }
 });
-const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Equipo 1');
+const selectDefensor = await getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Equipo 1');
 const row1 = new ActionRowBuilder().addComponents(selectDefensor);
 const row2 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
@@ -1236,15 +1256,24 @@ components: [row1, row2]
 if (interaction.isStringSelectMenu() && interaction.customId === 'asalto_seleccionar_sede') {
 const sedeId = interaction.values[0];
 if (sedeId === 'none') return interaction.reply({ content: '❌ No hay sedes disponibles. Agrega una primero con "Gestionar Sedes".', flags: MessageFlags.Ephemeral });
-const sedesDb = sedesManager.getAll();
-const sedeDb = sedesDb.find(s => s.key === sedeId);
-const sedeData = sedeDb || sedesConfig[sedeId];
+const sedesDb = await PostgresSedesRepository.getAll();
+const sedeDb = sedesDb.find(s => s.name === sedeId);
+const emojiKey = sedeDb ? sedeDb.name.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+const sedeData = sedeDb ? {
+  nombre: sedeDb.name,
+  emoji: EMOJIS.sedes[emojiKey] || '🏰',
+  capacidad: sedeDb.capacidad,
+  coords: {
+    defensa: sedeDb.coords_defensa,
+    ataque: sedeDb.coords_ataque
+  }
+} : null;
 const setup = pendingSetups.get(interaction.user.id) || {};
 setup.sedeId = sedeId;
 setup.sedeData = sedeData;
 setup.isBicicleta = false;
 pendingSetups.set(interaction.user.id, setup);
-const selectDefensor = getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
+const selectDefensor = await getPaginatedFactionMenu('asalto_seleccionar_defensor', '🛡️ Selección: Defensor');
 const row1 = new ActionRowBuilder().addComponents(selectDefensor);
 const row2 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_asalto_custom_defensor').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
@@ -1260,15 +1289,16 @@ if (value.startsWith('PAGINA_')) {
 const page = parseInt(value.split('_').pop());
 const setup = pendingSetups.get(interaction.user.id);
 const placeholder = (setup && setup.isBicicleta) ? '🛡️ Equipo 1' : '🛡️ Defensor';
-const menu = getPaginatedFactionMenu('asalto_seleccionar_defensor', placeholder, page);
+const menu = await getPaginatedFactionMenu('asalto_seleccionar_defensor', placeholder, page);
 return interaction.update({ components: [new ActionRowBuilder().addComponents(menu), interaction.message.components[1]] });
 }
 const defensorId = value;
-const defensorData = faccionesConfig[defensorId];
+const facciones = await PostgresFaccionesRepository.getAll();
+const defensorData = facciones.find(f => f.key === defensorId);
 const setup = pendingSetups.get(interaction.user.id);
 if (!setup) return interaction.reply({ content: '❌ La sesión de configuración ha expirado.', flags: MessageFlags.Ephemeral });
-setup.defensores = defensorData;
-const selectAtacante = getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
+setup.defensores = defensorData ? { nombre: defensorData.nombre, coordenadas: defensorData.coordenadas, emoji: EMOJIS.facciones[defensorId] || '🏳️' } : null;
+const selectAtacante = await getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
 const row1 = new ActionRowBuilder().addComponents(selectAtacante);
 const row2 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_asalto_custom_atacante').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
@@ -1286,7 +1316,7 @@ nombre: interaction.fields.getTextInputValue('custom_name'),
 coordenadas: "N/A",
 emoji: '✍️'
 };
-const selectAtacante = getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
+const selectAtacante = await getPaginatedFactionMenu('asalto_seleccionar_atacante', setup.isBicicleta ? '⚔️ Equipo 2' : '⚔️ Atacante');
 const row1 = new ActionRowBuilder().addComponents(selectAtacante);
 const row2 = new ActionRowBuilder().addComponents(
 new ButtonBuilder().setCustomId('btn_asalto_custom_atacante').setLabel('✍️ Nombre Personalizado').setStyle(ButtonStyle.Secondary)
@@ -1316,14 +1346,15 @@ if (value.startsWith('PAGINA_')) {
 const page = parseInt(value.split('_').pop());
 const setup = pendingSetups.get(interaction.user.id);
 const placeholder = (setup && setup.isBicicleta) ? '⚔️ Equipo 2' : '⚔️ Atacante';
-const menu = getPaginatedFactionMenu('asalto_seleccionar_atacante', placeholder, page);
+const menu = await getPaginatedFactionMenu('asalto_seleccionar_atacante', placeholder, page);
 return interaction.update({ components: [new ActionRowBuilder().addComponents(menu), interaction.message.components[1]] });
 }
 const atacanteId = value;
-const atacanteData = faccionesConfig[atacanteId];
+const facciones = await PostgresFaccionesRepository.getAll();
+const atacanteData = facciones.find(f => f.key === atacanteId);
 const setup = pendingSetups.get(interaction.user.id);
 if (!setup) return interaction.reply({ content: '❌ La sesión de configuración ha expirado. Por favor, reinicia el proceso.', flags: MessageFlags.Ephemeral });
-setup.atacantes = atacanteData;
+setup.atacantes = atacanteData ? { nombre: atacanteData.nombre, coordenadas: atacanteData.coordenadas, emoji: EMOJIS.facciones[atacanteId] || '🏳️' } : null;
 const modal = new ModalBuilder()
 .setCustomId('asalto_setup_modal')
 .setTitle(`👥 Configuración de ${setup.isBicicleta ? 'Evento' : 'Asalto'}`);
@@ -1679,10 +1710,11 @@ if (interaction.isModalSubmit() && interaction.customId.startsWith('rey_ganador_
       mensajeFinal = fs.readFileSync(finalRCPath, 'utf8');
       let sedesQueVan = [];
   if (session.brStatus) {
+    const faccionesBr = await getFaccionesBr();
     for (const userId in session.brStatus) {
       for (const facKey in session.brStatus[userId]) {
         if (session.brStatus[userId][facKey] === 'tepeado') {
-          const fac = getFaccionesBr()[facKey];
+          const fac = faccionesBr[facKey];
           if (fac && !sedesQueVan.includes(fac.nombre)) {
             sedesQueVan.push(fac.nombre);
           }

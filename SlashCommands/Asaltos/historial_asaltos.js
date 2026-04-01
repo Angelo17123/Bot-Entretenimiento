@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-const JsonMatchRepository = require("../../src/infrastructure/database/json/JsonMatchRepository");
+const PostgresMatchRepository = require("../../src/infrastructure/database/postgres/PostgresMatchRepository");
 const { resolveWeekQuery, getWeekNumber } = require("../../src/services/assaultPersistence");
 function formatLine(i, r) {
 const tipo = r.event_subtype === 'rey_del_crimen' ? '👑' :
@@ -42,7 +42,7 @@ try {
 const raw = interaction.options.getString("semana");
 const week = resolveWeekQuery(raw);
 const weekNum = getWeekNumber(new Date(week.replace('-W', '-01')));
-let rows = await JsonMatchRepository.getMatchesByIsoYearWeek(week);
+let rows = await PostgresMatchRepository.getMatchesByIsoYearWeek(week);
 if (!rows.length) {
 return interaction.editReply({
 content: `No hay eventos registrados para la **Semana ${weekNum}**.`,

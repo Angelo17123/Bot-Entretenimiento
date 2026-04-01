@@ -1,4 +1,4 @@
-const JsonMatchRepository = require("../infrastructure/database/json/JsonMatchRepository");
+const PostgresMatchRepository = require("../infrastructure/database/postgres/PostgresMatchRepository");
 const localRegistro = require("./localRegistro");
 
 function getISOYearWeekString(d = new Date()) {
@@ -130,13 +130,13 @@ async function saveBrEvent(session, sessionId, extra = {}) {
     eventSubtype: session.brType === 'rey' ? 'rey_del_crimen' : session.brType === 'cayo' ? 'br_cayo' : 'br_ciudad',
     source: 'entretenimiento_system',
   };
-  let jsonOk = false;
+  let pgOk = false;
   try {
-    await JsonMatchRepository.save(match);
-    jsonOk = true;
-    console.log(`💾 BR ${match.id} guardado JSON DB (${match.eventSubtype}).`);
+    await PostgresMatchRepository.save(match);
+    pgOk = true;
+    console.log(`💾 BR ${match.id} guardado PostgreSQL (${match.eventSubtype}).`);
   } catch (e) {
-    console.error('❌ Error guardando BR en JSON DB:', e);
+    console.error('❌ Error guardando BR en PostgreSQL:', e);
   }
   try {
     const localRow = matchToLocalRecord(match);
@@ -145,11 +145,11 @@ async function saveBrEvent(session, sessionId, extra = {}) {
     console.error('⚠️ Error guardando BR en LOCALREGISTRO (no crítico):', e.message);
   }
   return {
-    ok: jsonOk,
+    ok: pgOk,
     matchId: match.id,
     isoYearWeek: match.isoYearWeek,
     local: true,
-    mysql: jsonOk,
+    postgres: pgOk,
   };
 }
 async function saveFinishedAssault(session, sessionId) {
@@ -159,14 +159,14 @@ async function saveFinishedAssault(session, sessionId) {
   const creatorId = session.creatorId || session.staff?.[0];
   const match = sessionToMatchRecord(session, sessionId, creatorId);
   const localRow = matchToLocalRecord(match);
-  let jsonOk = false;
+  let pgOk = false;
   try {
-    await JsonMatchRepository.save(match);
-    jsonOk = true;
-    console.log(`💾 Asalto ${match.id} guardado JSON DB.`);
+    await PostgresMatchRepository.save(match);
+    pgOk = true;
+    console.log(`💾 Asalto ${match.id} guardado PostgreSQL.`);
   } catch (e) {
-    console.error("❌ Error guardando asalto en JSON DB:", e);
-    return { ok: false, reason: "json_error", error: e.message };
+    console.error("❌ Error guardando asalto en PostgreSQL:", e);
+    return { ok: false, reason: "postgres_error", error: e.message };
   }
   try {
     localRegistro.appendAssault(localRow);
@@ -178,23 +178,23 @@ async function saveFinishedAssault(session, sessionId) {
     matchId: match.id,
     isoYearWeek: match.isoYearWeek,
     local: true,
-    mysql: jsonOk,
+    postgres: pgOk,
   };
 }
-function getAssaultsByUser(userId, isoYearWeek = null) {
-  const all = JsonMatchRepository.getAllMatches();
-  let filtered = all.filter(r => r.creatorId === userId);
+async function getAssaultsByUser(userId, isoYearWeek = null) {
+  const all = await PostgresMatchRepository.getAllMatches();
+  let filtered = all.filter(r => r.creatorid === userId);
   if (isoYearWeek) {
     filtered = filtered.filter(r => r.iso_year_week === isoYearWeek);
   }
   return filtered;
 }
-function getRanking(isoYearWeek = null) {
-  const all = JsonMatchRepository.getAllMatches();
+async function getRanking(isoYearWeek = null) {
+  const all = await PostgresMatchRepository.getAllMatches();
   const userStats = {};
   for (const record of all) {
     if (isoYearWeek && record.iso_year_week !== isoYearWeek) continue;
-    const allParticipants = [record.creatorId, ...(record.staffApoyo || [])].filter(Boolean);
+    const allParticipants = [record.creatorid, ...(record.staffapoyo || [])].filter(Boolean);
     for (const userId of allParticipants) {
       if (!userStats[userId]) {
         userStats[userId] = {
@@ -216,7 +216,7 @@ function getRanking(isoYearWeek = null) {
         atk: record.atk_name,
         score: `${record.score_def}-${record.score_atk}`,
         id: record.id,
-        rol: userId === record.creatorId ? 'Creador' : 'Apoyo',
+        rol: userId === record.creatorid ? 'Creador' : 'Apoyo',
         tipo: tipo
       });
     }
@@ -237,8 +237,8 @@ function getWeeksInMonth(year, month) {
   }
   return weeks.sort();
 }
-function getRankingMensual() {
-  const all = JsonMatchRepository.getAllMatches();
+async function getRankingMensual() {
+  const all = await PostgresMatchRepository.getAllMatches();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -247,7 +247,7 @@ function getRankingMensual() {
     if (!record.created_at) continue;
     const d = new Date(record.created_at);
     if (d.getFullYear() !== year || d.getMonth() !== month) continue;
-    const allParticipants = [record.creatorId, ...(record.staffApoyo || [])].filter(Boolean);
+    const allParticipants = [record.creatorid, ...(record.staffapoyo || [])].filter(Boolean);
     for (const userId of allParticipants) {
       if (!userStats[userId]) {
         userStats[userId] = {
@@ -269,15 +269,15 @@ function getRankingMensual() {
         atk: record.atk_name,
         score: `${record.score_def}-${record.score_atk}`,
         id: record.id,
-        rol: userId === record.creatorId ? 'Creador' : 'Apoyo',
+        rol: userId === record.creatorid ? 'Creador' : 'Apoyo',
         tipo: tipo
       });
     }
   }
   return Object.values(userStats).sort((a, b) => b.count - a.count);
 }
-function getAssaultsByUserMensual(userId) {
-  const all = JsonMatchRepository.getAllMatches();
+async function getAssaultsByUserMensual(userId) {
+  const all = await PostgresMatchRepository.getAllMatches();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -285,7 +285,7 @@ function getAssaultsByUserMensual(userId) {
     if (!r.created_at) return false;
     const d = new Date(r.created_at);
     if (d.getFullYear() !== year || d.getMonth() !== month) return false;
-    const participants = [r.creatorId, ...(r.staffApoyo || [])];
+    const participants = [r.creatorid, ...(r.staffapoyo || [])];
     return participants.includes(userId);
   });
 }

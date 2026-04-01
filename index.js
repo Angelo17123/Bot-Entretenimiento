@@ -2,9 +2,10 @@ const path = require("path");
 const { Client, Collection } = require("discord.js");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 require("colors");
-const JsonMigrationService = require("./src/infrastructure/database/json/JsonMigrationService");
-const JsonMatchRepository = require("./src/infrastructure/database/json/JsonMatchRepository");
-const SedesManager = require("./src/infrastructure/database/json/SedesManager");
+const db = require("./src/infrastructure/database/PostgresConnection");
+const PostgresMigrationService = require("./src/infrastructure/database/postgres/PostgresMigrationService");
+const PostgresMatchRepository = require("./src/infrastructure/database/postgres/PostgresMatchRepository");
+const PostgresSedesRepository = require("./src/infrastructure/database/postgres/PostgresSedesRepository");
 const client = new Client({ intents: 53608447 });
 client.slashCommands = new Collection();
 (async () => {
@@ -16,13 +17,14 @@ client.slashCommands = new Collection();
   }
   await require("./Handlers/eventHandler").loadEvents(client);
   try {
-    await JsonMigrationService.runMigrations();
-    await JsonMatchRepository.init();
-    await SedesManager.init();
-    console.log("✅ JSON DB listo (asaltos a sede se guardan por semana ISO).".green);
+    await db.connect();
+    await PostgresMigrationService.runMigrations();
+    await PostgresMatchRepository.init();
+    await PostgresSedesRepository.init();
+    console.log("✅ PostgreSQL listo (asaltos a sede se guardan por semana ISO).".green);
   } catch (e) {
     console.error(
-      "❌ JSON DB no disponible. El bot arranca pero no se guardarán asaltos.".red,
+      "❌ PostgreSQL no disponible. El bot arranca pero no se guardarán asaltos.".red,
       e.message
     );
   }
